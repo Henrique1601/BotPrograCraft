@@ -1,0 +1,21 @@
+export {
+  SCHEMA_SQL,
+  applySchema,
+  initializeDatabase,
+  type DatabaseOptions,
+} from './database';
+
+export {
+  ProgressRepository,
+  type AppendMessageInput,
+  type CategoryStats,
+  type ExerciseAttemptRecord,
+  type ListAttemptsOptions,
+  type MessageRole,
+  type ProgressStats,
+  type RecordAttemptInput,
+  type RecordRecurringErrorInput,
+  type RecurringErrorRecord,
+  type SessionMessageRecord,
+  type TopRecurringErrorsOptions,
+} from './repository';

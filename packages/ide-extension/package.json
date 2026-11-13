@@ -1,0 +1,76 @@
+{
+  "name": "@botprogracraft/ide-extension",
+  "displayName": "BotPrograCraft IDE Bridge",
+  "description": "Streams active editor context, selections, and diagnostics from VS Code and Antigravity IDE to the BotPrograCraft desktop tutor.",
+  "version": "0.1.0",
+  "publisher": "botprogracraft",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Education",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "watch": "tsc --watch -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "package:vsix": "npm run build && npx @vscode/vsce package --no-dependencies"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "botprogracraft.toggleLiveSync",
+        "title": "BotPrograCraft: Toggle Live Sync"
+      },
+      {
+        "command": "botprogracraft.sendSelection",
+        "title": "BotPrograCraft: Send Current Selection"
+      },
+      {
+        "command": "botprogracraft.switchTutorMode",
+        "title": "BotPrograCraft: Switch Tutor Mode"
+      }
+    ],
+    "configuration": {
+      "title": "BotPrograCraft",
+      "properties": {
+        "botprogracraft.wsPort": {
+          "type": "number",
+          "default": 4848,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Local WebSocket port used to connect to the BotPrograCraft desktop app."
+        },
+        "botprogracraft.liveSync": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically stream active editor context, selections, and diagnostics to BotPrograCraft."
+        },
+        "botprogracraft.debounceMs": {
+          "type": "number",
+          "default": 250,
+          "minimum": 50,
+          "maximum": 5000,
+          "description": "Debounce delay in milliseconds before sending selection or diagnostic updates."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@botprogracraft/shared": "*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.0"
+  }
+}

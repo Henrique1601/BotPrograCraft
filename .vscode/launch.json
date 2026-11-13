@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch IDE Extension (Extension Host)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/packages/ide-extension"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/packages/ide-extension/dist/**/*.js"
+      ],
+      "preLaunchTask": "build:ide-extension"
+    },
+    {
+      "name": "Launch Desktop App (Electron)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron",
+      "windows": {
+        "runtimeExecutable": "${workspaceFolder}/node_modules/.bin/electron.cmd"
+      },
+      "args": [
+        "${workspaceFolder}/packages/desktop-app"
+      ],
+      "cwd": "${workspaceFolder}/packages/desktop-app",
+      "preLaunchTask": "build:all",
+      "console": "integratedTerminal"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Launch BotPrograCraft (Extension + Desktop App)",
+      "configurations": [
+        "Launch IDE Extension (Extension Host)",
+        "Launch Desktop App (Electron)"
+      ],
+      "stopAll": true
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build:all",
+      "type": "shell",
+      "command": "npm run build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "build:ide-extension",
+      "type": "shell",
+      "command": "npm run build --workspace=@botprogracraft/ide-extension",
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "watch:ide-extension",
+      "type": "shell",
+      "command": "npm run watch --workspace=@botprogracraft/ide-extension",
+      "isBackground": true,
+      "group": "build",
+      "problemMatcher": "$tsc-watch"
+    },
+    {
+      "label": "build:desktop-app",
+      "type": "shell",
+      "command": "npm run build --workspace=@botprogracraft/desktop-app",
+      "group": "build",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "start:desktop-app",
+      "type": "shell",
+      "command": "npm run start --workspace=@botprogracraft/desktop-app",
+      "dependsOn": ["build:all"],
+      "problemMatcher": []
+    }
+  ]
+}
