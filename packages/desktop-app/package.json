@@ -1,6 +1,7 @@
 {
   "name": "@botprogracraft/desktop-app",
   "version": "0.1.0",
+  "author": "BotPrograCraft",
   "private": true,
   "description": "Electron + React floating HUD overlay for BotPrograCraft.",
   "main": "dist/main/index.js",
@@ -36,6 +37,7 @@
   "build": {
     "appId": "com.botprogracraft.desktop",
     "productName": "BotPrograCraft",
+    "electronVersion": "35.7.5",
     "directories": {
       "output": "../../release"
     },

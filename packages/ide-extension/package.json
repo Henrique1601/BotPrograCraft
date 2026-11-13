@@ -1,5 +1,5 @@
 {
-  "name": "@botprogracraft/ide-extension",
+  "name": "botprogracraft-ide-extension",
   "displayName": "BotPrograCraft IDE Bridge",
   "description": "Streams active editor context, selections, and diagnostics from VS Code and Antigravity IDE to the BotPrograCraft desktop tutor.",
   "version": "0.1.0",

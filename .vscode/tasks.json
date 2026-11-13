@@ -14,14 +14,14 @@
     {
       "label": "build:ide-extension",
       "type": "shell",
-      "command": "npm run build --workspace=@botprogracraft/ide-extension",
+      "command": "npm run build --workspace=botprogracraft-ide-extension",
       "group": "build",
       "problemMatcher": ["$tsc"]
     },
     {
       "label": "watch:ide-extension",
       "type": "shell",
-      "command": "npm run watch --workspace=@botprogracraft/ide-extension",
+      "command": "npm run watch --workspace=botprogracraft-ide-extension",
       "isBackground": true,
       "group": "build",
       "problemMatcher": "$tsc-watch"
