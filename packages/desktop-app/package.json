@@ -30,7 +30,7 @@
     "@types/ws": "^8.5.14",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^35.0.0",
-    "electron-builder": "^25.1.8",
+    "electron-builder": "^26.18.0",
     "typescript": "^5.8.2",
     "vite": "^6.2.0"
   },

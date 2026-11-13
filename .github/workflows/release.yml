@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -35,13 +36,16 @@ jobs:
 
       - name: Package Desktop App (Windows)
         run: |
-          npx --workspace=@botprogracraft/desktop-app electron-builder --win --x64 --dir
-          Compress-Archive -Path "release/win-unpacked/*" -DestinationPath "release/BotPrograCraft-${{ github.ref_name }}-win-x64.zip" -Force
+          $ErrorActionPreference = 'Stop'
+          npx --yes electron-builder@26.18.0 --win --x64 --dir --projectDir packages/desktop-app
+          $zipName = if ("${{ github.ref_type }}" -eq "tag") { "BotPrograCraft-${{ github.ref_name }}-win-x64.zip" } else { "BotPrograCraft-dev-win-x64.zip" }
+          Compress-Archive -Path "release/win-unpacked/*" -DestinationPath "release/$zipName" -Force
 
       - name: Upload Release Assets
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/BotPrograCraft-${{ github.ref_name }}-win-x64.zip
+            release/BotPrograCraft-*-win-x64.zip
             packages/ide-extension/*.vsix
           generate_release_notes: true
