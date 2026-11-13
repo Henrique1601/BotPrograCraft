@@ -2,7 +2,19 @@
   "name": "botprogracraft",
   "version": "0.1.0",
   "private": true,
-  "description": "BotPrograCraft — AI Pair-Programming & Socratic Tutor monorepo with Gemini Live API, IDE bridge, and Electron HUD.",
+  "license": "MIT",
+  "author": "Henrique Bezerra Dos Santos",
+  "description": "BotPrograCraft — Live AI Pair-Programming, Voice & Screen-Reading Tutor for VS Code and Antigravity IDE.",
+  "keywords": [
+    "ai-tutor",
+    "gemini-live",
+    "electron",
+    "vscode-extension",
+    "antigravity-ide",
+    "typescript",
+    "sqlite",
+    "pair-programming"
+  ],
   "workspaces": [
     "packages/*"
   ],
