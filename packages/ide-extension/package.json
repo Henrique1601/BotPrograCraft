@@ -2,7 +2,7 @@
   "name": "botprogracraft-ide-extension",
   "displayName": "BotPrograCraft IDE Bridge",
   "description": "Streams active editor context, selections, and diagnostics from VS Code and Antigravity IDE to the BotPrograCraft desktop tutor.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "botprogracraft",
   "private": true,
   "engines": {

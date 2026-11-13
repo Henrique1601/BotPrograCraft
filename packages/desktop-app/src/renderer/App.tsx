@@ -7,12 +7,23 @@ import {
   type ScreenFrame,
   type TutorMode,
 } from '@botprogracraft/shared';
+import type {
+  ChallengeDifficulty,
+  ExerciseFeedback,
+  LogicChallenge,
+} from '@botprogracraft/ai-core';
 import type { TranscriptEntry } from '../main/ipcTypes';
-import type { ProgressStats, RecentAttempt } from './global';
+import type {
+  CaptureSourceSummary,
+  ProgressStats,
+  RecentAttempt,
+  RecurringError,
+  ScreenFramePreview,
+} from './global';
 import { useAudioCapture } from './hooks/useAudioCapture';
 import { useAudioPlayback } from './hooks/useAudioPlayback';
 
-type HudTab = 'chat' | 'progress';
+type HudTab = 'chat' | 'challenge' | 'progress';
 
 function VoiceWave({
   active,
@@ -137,18 +148,43 @@ export function App(): React.ReactElement {
   // SQLite progress state
   const [progressStats, setProgressStats] = useState<ProgressStats | null>(null);
   const [recentAttempts, setRecentAttempts] = useState<RecentAttempt[]>([]);
+  const [recurringErrors, setRecurringErrors] = useState<RecurringError[]>([]);
   const [progressLoading, setProgressLoading] = useState(false);
   const [progressAvailable, setProgressAvailable] = useState(true);
   const [progressError, setProgressError] = useState<string | null>(null);
+
+  // Screen source selector & privacy preview state
+  const [captureSources, setCaptureSources] = useState<CaptureSourceSummary[]>([]);
+  const [selectedSourceId, setSelectedSourceId] = useState<string>('');
+  const [framePreview, setFramePreview] = useState<ScreenFramePreview | null>(null);
+
+  // Logic Challenge tab state
+  const [challengeDifficulty, setChallengeDifficulty] =
+    useState<ChallengeDifficulty>('medium');
+  const [challengeTopic, setChallengeTopic] = useState('');
+  const [activeChallenge, setActiveChallenge] = useState<LogicChallenge | null>(
+    null,
+  );
+  const [solutionCode, setSolutionCode] = useState('');
+  const [challengeFeedback, setChallengeFeedback] =
+    useState<ExerciseFeedback | null>(null);
+  const [challengeLoading, setChallengeLoading] = useState(false);
+  const [evaluatingLoading, setEvaluatingLoading] = useState(false);
+  const [challengeError, setChallengeError] = useState<string | null>(null);
 
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   const audioPlayback = useAudioPlayback();
   const { enqueueAudio, stop: stopPlayback } = audioPlayback;
+  const isPlayingRef = useRef(false);
+  isPlayingRef.current = audioPlayback.isPlaying;
 
   const audioCapture = useAudioCapture({
     sampleRate: 16000,
     onAudioChunk: (base64Pcm16, sampleRate) => {
+      if (isPlayingRef.current) {
+        stopPlayback();
+      }
       window.botprogracraft.sendAudioChunk(base64Pcm16, sampleRate);
     },
   });
@@ -158,14 +194,18 @@ export function App(): React.ReactElement {
       audioCapture.stopCapture();
       await window.botprogracraft.stopLiveSession();
     } else {
+      if (isPlayingRef.current) {
+        stopPlayback();
+      }
       await window.botprogracraft.startLiveSession();
       await audioCapture.startCapture();
     }
-  }, [audioCapture]);
+  }, [audioCapture, stopPlayback]);
 
   const loadProgress = useCallback(async () => {
     const getStats = window.botprogracraft?.getProgressStats;
     const listAttempts = window.botprogracraft?.listRecentAttempts;
+    const listErrors = window.botprogracraft?.listRecurringErrors;
 
     if (!getStats && !listAttempts) {
       setProgressAvailable(false);
@@ -176,6 +216,7 @@ export function App(): React.ReactElement {
         recurringErrorCount: 0,
       });
       setRecentAttempts([]);
+      setRecurringErrors([]);
       return;
     }
 
@@ -184,7 +225,7 @@ export function App(): React.ReactElement {
     setProgressError(null);
 
     try {
-      const [stats, attempts] = await Promise.all([
+      const [stats, attempts, errors] = await Promise.all([
         getStats
           ? getStats()
           : Promise.resolve({
@@ -194,15 +235,26 @@ export function App(): React.ReactElement {
               recurringErrorCount: 0,
             }),
         listAttempts ? listAttempts(5) : Promise.resolve([]),
+        listErrors ? listErrors(8) : Promise.resolve([]),
       ]);
       setProgressStats(stats);
       setRecentAttempts(attempts);
+      setRecurringErrors(errors);
     } catch (err) {
       setProgressError(
         err instanceof Error ? err.message : 'Failed to load progress',
       );
     } finally {
       setProgressLoading(false);
+    }
+  }, []);
+
+  const refreshCaptureSources = useCallback(async () => {
+    try {
+      const sources = await window.botprogracraft.listCaptureSources();
+      setCaptureSources(sources);
+    } catch {
+      // Ignore if screen sources are temporarily unavailable.
     }
   }, []);
 
@@ -218,7 +270,10 @@ export function App(): React.ReactElement {
       setScreenShareEnabled(snapshot.screenShareEnabled);
       setLatestFrame(snapshot.latestFrame);
       setApiKeyConfigured(snapshot.apiKeyConfigured);
+      setSelectedSourceId(snapshot.selectedCaptureSourceId ?? '');
     });
+
+    void refreshCaptureSources();
 
     const unsubs = [
       window.botprogracraft.onIdeConnection(setIdeConnected),
@@ -237,7 +292,8 @@ export function App(): React.ReactElement {
         stopPlayback();
       }),
       window.botprogracraft.onScreenFrame(setLatestFrame),
-      window.botprogracraft.onPushToTalkShortcut(() => {
+      window.botprogracraft.onScreenFramePreview(setFramePreview),
+      window.botprogracraft.onPushToTalkToggle(() => {
         void handleToggleVoice();
       }),
     ];
@@ -248,7 +304,7 @@ export function App(): React.ReactElement {
         unsub();
       }
     };
-  }, [enqueueAudio, handleToggleVoice, stopPlayback]);
+  }, [enqueueAudio, handleToggleVoice, refreshCaptureSources, stopPlayback]);
 
   useEffect(() => {
     if (activeTab === 'chat') {
@@ -270,12 +326,68 @@ export function App(): React.ReactElement {
   const handleToggleScreen = async () => {
     const next = !screenShareEnabled;
     setScreenShareEnabled(next);
+    if (next) {
+      await refreshCaptureSources();
+    }
     await window.botprogracraft.setScreenShareEnabled(next);
     if (next) {
       const frame = await window.botprogracraft.captureScreenFrame();
       if (frame) {
         setLatestFrame(frame);
       }
+    } else {
+      setFramePreview(null);
+    }
+  };
+
+  const handleSelectCaptureSource = async (sourceId: string) => {
+    setSelectedSourceId(sourceId);
+    await window.botprogracraft.setCaptureSource(sourceId || null);
+    if (screenShareEnabled) {
+      const frame = await window.botprogracraft.captureScreenFrame();
+      if (frame) {
+        setLatestFrame(frame);
+      }
+    }
+  };
+
+  const handleGenerateChallenge = async () => {
+    setChallengeLoading(true);
+    setChallengeError(null);
+    setChallengeFeedback(null);
+    try {
+      const challenge = await window.botprogracraft.generateLogicChallenge(
+        challengeDifficulty,
+        challengeTopic.trim() || undefined,
+      );
+      setActiveChallenge(challenge);
+      setSolutionCode(challenge.starterCode ?? '');
+    } catch (err) {
+      setChallengeError(
+        err instanceof Error ? err.message : 'Falha ao gerar desafio.',
+      );
+    } finally {
+      setChallengeLoading(false);
+    }
+  };
+
+  const handleEvaluateSolution = async () => {
+    if (!activeChallenge || !solutionCode.trim()) return;
+    setEvaluatingLoading(true);
+    setChallengeError(null);
+    try {
+      const feedback = await window.botprogracraft.evaluateSolution(
+        activeChallenge,
+        solutionCode,
+      );
+      setChallengeFeedback(feedback);
+      void loadProgress();
+    } catch (err) {
+      setChallengeError(
+        err instanceof Error ? err.message : 'Falha ao avaliar solução.',
+      );
+    } finally {
+      setEvaluatingLoading(false);
     }
   };
 
@@ -481,6 +593,15 @@ export function App(): React.ReactElement {
           <button
             type="button"
             role="tab"
+            aria-selected={activeTab === 'challenge'}
+            className={`hud-tab ${activeTab === 'challenge' ? 'hud-tab--active' : ''}`}
+            onClick={() => setActiveTab('challenge')}
+          >
+            Desafio
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={activeTab === 'progress'}
             className={`hud-tab ${activeTab === 'progress' ? 'hud-tab--active' : ''}`}
             onClick={() => setActiveTab('progress')}
@@ -512,6 +633,139 @@ export function App(): React.ReactElement {
           )}
           <div ref={transcriptEndRef} />
         </main>
+      ) : activeTab === 'challenge' ? (
+        <section className="challenge-panel" role="tabpanel" aria-label="Desafio">
+          <div className="challenge-controls">
+            <select
+              className="hud-select"
+              aria-label="Dificuldade"
+              value={challengeDifficulty}
+              onChange={(e) =>
+                setChallengeDifficulty(e.target.value as ChallengeDifficulty)
+              }
+            >
+              <option value="easy">Fácil</option>
+              <option value="medium">Médio</option>
+              <option value="hard">Difícil</option>
+            </select>
+            <input
+              type="text"
+              className="hud-input"
+              placeholder="Tópico opcional (ex: recursão, arrays)"
+              value={challengeTopic}
+              onChange={(e) => setChallengeTopic(e.target.value)}
+            />
+            <button
+              type="button"
+              className="send-btn"
+              disabled={challengeLoading}
+              onClick={() => void handleGenerateChallenge()}
+            >
+              {challengeLoading ? 'Gerando...' : 'Gerar Desafio'}
+            </button>
+          </div>
+
+          {challengeError && (
+            <div className="hud-alert hud-alert--error">{challengeError}</div>
+          )}
+
+          {!activeChallenge ? (
+            <div className="progress-notice">
+              Escolha a dificuldade e clique em <strong>Gerar Desafio</strong> para
+              praticar lógica no idioma do arquivo ativo ({ideContext?.languageId || 'typescript'}).
+            </div>
+          ) : (
+            <div className="challenge-card">
+              <div className="challenge-card-header">
+                <span className="challenge-card-title">{activeChallenge.title}</span>
+                <span className="attempt-mode-tag">{activeChallenge.difficulty}</span>
+              </div>
+              <div className="challenge-prompt">{activeChallenge.prompt}</div>
+
+              {activeChallenge.expectedConcepts.length > 0 && (
+                <div className="challenge-tags">
+                  {activeChallenge.expectedConcepts.map((concept) => (
+                    <span key={concept} className="attempt-mode-tag">
+                      {concept}
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              {activeChallenge.hints.length > 0 && (
+                <details className="challenge-hints">
+                  <summary>Dicas ({activeChallenge.hints.length})</summary>
+                  <ul>
+                    {activeChallenge.hints.map((hint, idx) => (
+                      <li key={idx}>{hint}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+
+              <textarea
+                className="challenge-textarea"
+                rows={6}
+                placeholder="Escreva sua solução aqui..."
+                value={solutionCode}
+                onChange={(e) => setSolutionCode(e.target.value)}
+              />
+
+              <div className="challenge-actions">
+                <button
+                  type="button"
+                  className="send-btn"
+                  disabled={evaluatingLoading || !solutionCode.trim()}
+                  onClick={() => void handleEvaluateSolution()}
+                >
+                  {evaluatingLoading ? 'Avaliando...' : 'Avaliar Solução'}
+                </button>
+              </div>
+
+              {challengeFeedback && (
+                <div className="feedback-card">
+                  <div className="feedback-header">
+                    <span
+                      className={`attempt-badge ${
+                        challengeFeedback.passed
+                          ? 'attempt-badge--pass'
+                          : 'attempt-badge--fail'
+                      }`}
+                    >
+                      {challengeFeedback.passed ? 'Aprovado' : 'Revisar'}
+                    </span>
+                    <span className="attempt-score">
+                      Nota: {challengeFeedback.score}%
+                    </span>
+                  </div>
+                  {challengeFeedback.strengths.length > 0 && (
+                    <div className="feedback-list">
+                      <strong>Pontos fortes:</strong>
+                      <ul>
+                        {challengeFeedback.strengths.map((s, i) => (
+                          <li key={i}>{s}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {challengeFeedback.improvements.length > 0 && (
+                    <div className="feedback-list">
+                      <strong>Melhorias:</strong>
+                      <ul>
+                        {challengeFeedback.improvements.map((imp, i) => (
+                          <li key={i}>{imp}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <div className="feedback-next">
+                    <strong>Próximo passo:</strong> {challengeFeedback.nextStep}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
       ) : (
         <section className="progress-panel" role="tabpanel" aria-label="Progresso">
           <div className="progress-header">
@@ -632,19 +886,89 @@ export function App(): React.ReactElement {
               </div>
             )}
           </div>
+          <div className="attempts-section">
+            <div className="progress-title">Top Erros Recorrentes</div>
+            {recurringErrors.length === 0 ? (
+              <div className="progress-notice">
+                Nenhum erro recorrente registrado ainda. Erros de diagnóstico da IDE
+                aparecem aqui automaticamente.
+              </div>
+            ) : (
+              <div className="attempts-list">
+                {recurringErrors.map((err) => {
+                  const fileLabel = err.filePath
+                    ? err.filePath.split(/[/\\]/).pop() ?? err.filePath
+                    : '';
+                  return (
+                    <div key={err.id} className="attempt-row">
+                      <div className="attempt-main">
+                        <span className="attempt-title" title={err.errorSignature}>
+                          {err.errorSignature}
+                        </span>
+                        <span className="attempt-meta">
+                          <span className="attempt-mode-tag">{err.languageId}</span>
+                          {fileLabel && <span>{fileLabel}</span>}
+                        </span>
+                      </div>
+                      <div className="attempt-right">
+                        <span className="attempt-badge attempt-badge--fail">
+                          ×{err.occurrenceCount}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </section>
       )}
 
-      {screenShareEnabled && latestFrame && (
+      {screenShareEnabled && (
         <div className="hud-preview-bar">
-          <img
-            className="hud-preview-thumb"
-            src={`data:${latestFrame.mimeType};base64,${latestFrame.dataBase64}`}
-            alt="Screen capture preview"
-          />
-          <span>
-            Screen active ({latestFrame.width}×{latestFrame.height})
-          </span>
+          {(framePreview?.dataUrl || latestFrame) && (
+            <img
+              className="hud-preview-thumb"
+              src={
+                framePreview?.dataUrl ??
+                `data:${latestFrame!.mimeType};base64,${latestFrame!.dataBase64}`
+              }
+              alt="Screen capture preview"
+            />
+          )}
+          <div className="hud-preview-meta">
+            <div className="hud-preview-source-row">
+              <select
+                className="hud-select hud-select--compact"
+                aria-label="Fonte de Tela"
+                value={selectedSourceId}
+                onChange={(e) => void handleSelectCaptureSource(e.target.value)}
+              >
+                <option value="">Fonte de Tela: Principal</option>
+                {captureSources.map((src) => (
+                  <option key={src.id} value={src.id}>
+                    {src.kind === 'window' ? '🪟 ' : '🖥 '}
+                    {src.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="icon-btn"
+                onClick={() => void refreshCaptureSources()}
+                title="Atualizar fontes de tela/janela"
+              >
+                ↻
+              </button>
+            </div>
+            <span className="hud-preview-status">
+              {framePreview
+                ? `${framePreview.sent ? 'Enviado' : 'Ignorado'} (${framePreview.reason})`
+                : latestFrame
+                  ? `Screen active (${latestFrame.width}×${latestFrame.height})`
+                  : 'Aguardando captura...'}
+            </span>
+          </div>
         </div>
       )}
 

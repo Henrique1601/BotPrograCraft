@@ -1,4 +1,14 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, session } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  nativeImage,
+  session,
+  Tray,
+} from 'electron';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   DEFAULT_WS_PORT,
@@ -9,9 +19,15 @@ import {
   type TutorMode,
 } from '@botprogracraft/shared';
 import {
+  ChallengeDifficultySchema,
   ContextAggregator,
   GeminiLiveSessionManager,
+  LogicChallengeSchema,
   ScreenFrameGate,
+  StructuredChallengeService,
+  type ChallengeDifficulty,
+  type ExerciseFeedback,
+  type LogicChallenge,
 } from '@botprogracraft/ai-core';
 import { ProgressRepository } from '@botprogracraft/storage';
 import { loadWorkspaceEnv } from './envLoader';
@@ -19,10 +35,17 @@ import type {
   DesktopStateSnapshot,
   ProgressStatsSummary,
   RecentAttemptSummary,
+  RecurringErrorSummary,
+  ScreenFramePreview,
   TranscriptEntry,
 } from './ipcTypes';
 import { createOverlayWindow } from './overlayWindow';
-import { capturePrimaryScreenFrame } from './screenCapture';
+import {
+  capturePrimaryScreenFrame,
+  getCaptureSource,
+  listCaptureSources,
+  setCaptureSource,
+} from './screenCapture';
 import { IdeWsServer } from './wsServer';
 
 loadWorkspaceEnv();
@@ -34,6 +57,8 @@ const MAX_AUDIO_CHUNK_BASE64_LENGTH = 512 * 1024;
 const SESSION_ID = `session-${Date.now()}`;
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let isQuitting = false;
 let screenInterval: ReturnType<typeof setInterval> | null = null;
 let screenShareEnabled = false;
 let currentTutorMode: TutorMode = 'socratic';
@@ -42,11 +67,23 @@ let progressRepo: ProgressRepository | null = null;
 
 const contextAggregator = new ContextAggregator();
 const wsServer = new IdeWsServer(DEFAULT_WS_PORT);
+const challengeService = new StructuredChallengeService({
+  apiKey: process.env.GEMINI_API_KEY ?? '',
+});
 const screenFrameGate = new ScreenFrameGate({
   minIntervalMs: 1000,
   forceAfterMs: 15_000,
   minChangeRatio: 0.02,
 });
+
+function resolveAssetPath(filename: string): string | undefined {
+  const candidates = [
+    path.resolve(__dirname, '..', '..', '..', '..', 'assets', filename),
+    path.resolve(process.cwd(), 'assets', filename),
+    path.resolve(process.resourcesPath ?? '', 'assets', filename),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
 
 function redactSensitiveText(message: string): string {
   return message
@@ -187,6 +224,14 @@ async function captureAndBroadcastFrame(): Promise<ScreenFrame | null> {
   if (!frame) return null;
 
   const decision = screenFrameGate.shouldSend(frame);
+  const preview: ScreenFramePreview = {
+    dataUrl: `data:${frame.mimeType};base64,${frame.dataBase64}`,
+    sent: decision.shouldSend,
+    reason: decision.reason,
+    timestamp: frame.timestamp,
+  };
+  sendToRenderer('event:screen-frame-preview', preview);
+
   if (!decision.shouldSend) {
     return null;
   }
@@ -230,12 +275,28 @@ function registerIpcHandlers(): void {
       screenShareEnabled,
       latestFrame: contextAggregator.getLatestScreenFrame(),
       apiKeyConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
+      selectedCaptureSourceId: getCaptureSource(),
     }),
   );
 
   ipcMain.handle('desktop:capture-screen', async () => {
     return captureAndBroadcastFrame();
   });
+
+  ipcMain.handle('desktop:list-capture-sources', async () => {
+    return listCaptureSources();
+  });
+
+  ipcMain.handle(
+    'desktop:set-capture-source',
+    (_event, sourceId: unknown) => {
+      if (sourceId !== null && typeof sourceId !== 'string') {
+        throw new Error('Invalid capture sourceId parameter.');
+      }
+      setCaptureSource(sourceId);
+      screenFrameGate.reset();
+    },
+  );
 
   ipcMain.handle(
     'desktop:set-screen-share',
@@ -414,6 +475,105 @@ function registerIpcHandlers(): void {
         }));
     },
   );
+
+  ipcMain.handle(
+    'desktop:list-recurring-errors',
+    (_event, limit?: unknown): RecurringErrorSummary[] => {
+      if (
+        limit !== undefined &&
+        (typeof limit !== 'number' || !Number.isFinite(limit) || limit < 1)
+      ) {
+        throw new Error('Invalid limit parameter: expected positive number.');
+      }
+      if (!progressRepo) {
+        return [];
+      }
+      const safeLimit = limit === undefined ? 10 : Math.min(100, Math.floor(limit));
+      return progressRepo
+        .getTopRecurringErrors({ limit: safeLimit })
+        .map((err) => ({
+          id: err.id,
+          errorSignature: err.errorSignature,
+          languageId: err.languageId,
+          filePath: err.filePath,
+          occurrenceCount: err.occurrenceCount,
+          lastSeenAt: err.lastSeenAt,
+        }));
+    },
+  );
+
+  ipcMain.handle(
+    'desktop:generate-logic-challenge',
+    async (
+      _event,
+      difficulty: unknown,
+      topic?: unknown,
+    ): Promise<LogicChallenge> => {
+      const parsedDifficulty = ChallengeDifficultySchema.safeParse(difficulty);
+      if (!parsedDifficulty.success) {
+        throw new Error('Invalid difficulty parameter.');
+      }
+      if (topic !== undefined && typeof topic !== 'string') {
+        throw new Error('Invalid topic parameter: expected string.');
+      }
+      const languageId =
+        contextAggregator.getIdeContext()?.languageId || 'typescript';
+      return challengeService.generateLogicChallenge({
+        difficulty: parsedDifficulty.data as ChallengeDifficulty,
+        languageId,
+        topic: topic?.trim() || undefined,
+        unfiltered: currentTutorMode === 'direct',
+      });
+    },
+  );
+
+  ipcMain.handle(
+    'desktop:evaluate-solution',
+    async (
+      _event,
+      challenge: unknown,
+      userCode: unknown,
+    ): Promise<ExerciseFeedback> => {
+      const parsedChallenge = LogicChallengeSchema.safeParse(challenge);
+      if (!parsedChallenge.success) {
+        throw new Error('Invalid challenge payload.');
+      }
+      if (typeof userCode !== 'string' || !userCode.trim()) {
+        throw new Error('Solution code must not be empty.');
+      }
+      const languageId =
+        contextAggregator.getIdeContext()?.languageId || 'typescript';
+      const feedback = await challengeService.evaluateExerciseSolution({
+        challenge: parsedChallenge.data,
+        userCode,
+        languageId,
+        unfiltered: currentTutorMode === 'direct',
+      });
+
+      if (progressRepo) {
+        try {
+          progressRepo.recordAttempt({
+            title: parsedChallenge.data.title,
+            mode: currentTutorMode,
+            languageId,
+            prompt: parsedChallenge.data.prompt,
+            userCode,
+            passed: feedback.passed,
+            score: feedback.score,
+            feedback: {
+              strengths: feedback.strengths,
+              improvements: feedback.improvements,
+              nextStep: feedback.nextStep,
+            },
+          });
+        } catch {
+          // Do not fail evaluation response if local storage write fails.
+        }
+      }
+
+      return feedback;
+    },
+  );
 }
 
 function setupWsBridge(): void {
@@ -424,6 +584,24 @@ function setupWsBridge(): void {
   wsServer.on('context', (payload: IdeContextPayload) => {
     liveManager.updateIdeContext(payload);
     sendToRenderer('event:ide-context', payload);
+
+    if (progressRepo && payload.diagnostics.length > 0) {
+      const errorDiags = payload.diagnostics.filter((d) => d.severity === 'error');
+      for (const diag of errorDiags.slice(0, 10)) {
+        try {
+          progressRepo.recordRecurringError({
+            errorSignature: diag.message.slice(0, 240),
+            languageId: payload.languageId || 'unknown',
+            filePath: payload.activeFile ?? '',
+            notes: diag.source
+              ? `${diag.source}${diag.code !== undefined ? ` (${String(diag.code)})` : ''}`
+              : null,
+          });
+        } catch {
+          // Ignore storage errors while processing IDE context.
+        }
+      }
+    }
   });
 
   wsServer.on('error', (err: Error) => {
@@ -464,11 +642,61 @@ void app.whenReady().then(() => {
   registerIpcHandlers();
   setupWsBridge();
 
+  const iconPath =
+    resolveAssetPath(process.platform === 'win32' ? 'icon.ico' : 'icon.png') ??
+    resolveAssetPath('icon.png');
+
   mainWindow = createOverlayWindow({
     preloadPath: path.join(__dirname, 'preload.js'),
     rendererHtmlPath: path.join(__dirname, '..', 'renderer', 'index.html'),
     devServerUrl,
+    iconPath,
   });
+
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && tray) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+
+  const trayIconPath = resolveAssetPath('icon.png') ?? iconPath;
+  if (trayIconPath) {
+    const trayImage = nativeImage.createFromPath(trayIconPath).resize({
+      width: 16,
+      height: 16,
+    });
+    tray = new Tray(trayImage);
+    tray.setToolTip('BotPrograCraft');
+
+    const toggleWindow = () => {
+      if (!mainWindow || mainWindow.isDestroyed()) return;
+      if (mainWindow.isVisible()) {
+        mainWindow.hide();
+      } else {
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore();
+        }
+        mainWindow.show();
+        mainWindow.focus();
+      }
+    };
+
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Mostrar / Ocultar HUD', click: toggleWindow },
+        { type: 'separator' },
+        {
+          label: 'Sair',
+          click: () => {
+            isQuitting = true;
+            app.quit();
+          },
+        },
+      ]),
+    );
+    tray.on('double-click', toggleWindow);
+  }
 
   globalShortcut.register(PUSH_TO_TALK_SHORTCUT, () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -477,6 +705,7 @@ void app.whenReady().then(() => {
       }
       mainWindow.show();
     }
+    sendToRenderer('event:push-to-talk-toggle');
     sendToRenderer('event:push-to-talk');
     if (screenShareEnabled) {
       void captureAndBroadcastFrame();
@@ -489,9 +718,16 @@ void app.whenReady().then(() => {
         preloadPath: path.join(__dirname, 'preload.js'),
         rendererHtmlPath: path.join(__dirname, '..', 'renderer', 'index.html'),
         devServerUrl,
+        iconPath,
       });
+    } else if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show();
     }
   });
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
 });
 
 app.on('will-quit', () => {
@@ -499,6 +735,8 @@ app.on('will-quit', () => {
   stopScreenCaptureLoop();
   liveManager.disconnect();
   wsServer.stop();
+  tray?.destroy();
+  tray = null;
   if (progressRepo) {
     progressRepo.close();
     progressRepo = null;

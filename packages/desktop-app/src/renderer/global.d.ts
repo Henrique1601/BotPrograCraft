@@ -1,29 +1,20 @@
-import type { DesktopBridgeApi } from '../main/ipcTypes';
+import type {
+  DesktopBridgeApi,
+  ProgressStatsSummary,
+  RecentAttemptSummary,
+  RecurringErrorSummary,
+  ScreenFramePreview,
+} from '../main/ipcTypes';
+import type { CaptureSourceSummary } from '../main/screenCapture';
 
-export interface ProgressStats {
-  totalAttempts: number;
-  passedAttempts: number;
-  totalMessages: number;
-  recurringErrorCount: number;
-}
-
-export interface RecentAttempt {
-  id: number;
-  title: string;
-  mode: string;
-  passed: boolean;
-  score: number | null;
-  createdAt: string;
-}
-
-export interface ProgressBridgeExtension {
-  getProgressStats?: () => Promise<ProgressStats>;
-  listRecentAttempts?: (limit?: number) => Promise<RecentAttempt[]>;
-}
+export type ProgressStats = ProgressStatsSummary;
+export type RecentAttempt = RecentAttemptSummary;
+export type RecurringError = RecurringErrorSummary;
+export type { CaptureSourceSummary, ScreenFramePreview };
 
 declare global {
   interface Window {
-    botprogracraft: DesktopBridgeApi & ProgressBridgeExtension;
+    botprogracraft: DesktopBridgeApi;
   }
 }
 

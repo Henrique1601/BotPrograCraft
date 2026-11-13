@@ -5,7 +5,15 @@ import type {
   ScreenFrame,
   TutorMode,
 } from '@botprogracraft/shared';
-import type { DesktopBridgeApi, TranscriptEntry } from './ipcTypes';
+import type {
+  ChallengeDifficulty,
+  LogicChallenge,
+} from '@botprogracraft/ai-core';
+import type {
+  DesktopBridgeApi,
+  ScreenFramePreview,
+  TranscriptEntry,
+} from './ipcTypes';
 
 function subscribe<T extends unknown[]>(
   channel: string,
@@ -23,6 +31,9 @@ function subscribe<T extends unknown[]>(
 const api: DesktopBridgeApi = {
   getInitialState: () => ipcRenderer.invoke('desktop:get-initial-state'),
   captureScreenFrame: () => ipcRenderer.invoke('desktop:capture-screen'),
+  listCaptureSources: () => ipcRenderer.invoke('desktop:list-capture-sources'),
+  setCaptureSource: (sourceId: string | null) =>
+    ipcRenderer.invoke('desktop:set-capture-source', sourceId),
   setScreenShareEnabled: (enabled) =>
     ipcRenderer.invoke('desktop:set-screen-share', enabled),
   setTutorMode: (mode: TutorMode) =>
@@ -38,6 +49,12 @@ const api: DesktopBridgeApi = {
   getProgressStats: () => ipcRenderer.invoke('desktop:get-progress-stats'),
   listRecentAttempts: (limit?: number) =>
     ipcRenderer.invoke('desktop:list-recent-attempts', limit),
+  listRecurringErrors: (limit?: number) =>
+    ipcRenderer.invoke('desktop:list-recurring-errors', limit),
+  generateLogicChallenge: (difficulty: ChallengeDifficulty, topic?: string) =>
+    ipcRenderer.invoke('desktop:generate-logic-challenge', difficulty, topic),
+  evaluateSolution: (challenge: LogicChallenge, userCode: string) =>
+    ipcRenderer.invoke('desktop:evaluate-solution', challenge, userCode),
   onIdeConnection: (cb) =>
     subscribe<[connected: boolean]>('event:ide-connection', cb),
   onIdeContext: (cb) =>
@@ -58,8 +75,12 @@ const api: DesktopBridgeApi = {
   onTurnComplete: (cb) => subscribe<[]>('event:turn-complete', cb),
   onScreenFrame: (cb) =>
     subscribe<[frame: ScreenFrame]>('event:screen-frame', cb),
+  onScreenFramePreview: (cb) =>
+    subscribe<[preview: ScreenFramePreview]>('event:screen-frame-preview', cb),
   onPushToTalkShortcut: (cb) =>
     subscribe<[]>('event:push-to-talk', cb),
+  onPushToTalkToggle: (cb) =>
+    subscribe<[]>('event:push-to-talk-toggle', cb),
 };
 
 contextBridge.exposeInMainWorld('botprogracraft', api);

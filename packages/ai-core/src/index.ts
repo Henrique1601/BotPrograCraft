@@ -57,3 +57,13 @@ export {
   type FrameLike,
   type ScreenFrameGateOptions,
 } from './frameDiff';
+
+export {
+  DEFAULT_CHALLENGE_MODEL,
+  StructuredChallengeService,
+  type ChallengeGenerateFn,
+  type ChallengeGenerateRequest,
+  type EvaluateSolutionParams,
+  type GenerateChallengeParams,
+  type StructuredChallengeServiceOptions,
+} from './challengeService';

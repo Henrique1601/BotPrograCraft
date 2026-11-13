@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.hasSignificantFrameChange = exports.estimateByteDifferenceRatio = exports.computeFrameHash = exports.ScreenFrameGate = exports.safeParseWithSchema = exports.parseLogicChallenge = exports.parseExerciseFeedback = exports.parseBugAnalysis = exports.extractJsonPayload = exports.LogicChallengeSchema = exports.ExerciseFeedbackSchema = exports.ChallengeDifficultySchema = exports.BugSeveritySchema = exports.BugAnalysisSchema = exports.parseAudioSampleRate = exports.buildPermissiveSafetySettings = exports.GeminiLiveSessionManager = exports.DEFAULT_OUTPUT_SAMPLE_RATE = exports.DEFAULT_GEMINI_LIVE_MODEL = exports.ContextAggregator = exports.getSupportedTutorModes = exports.buildSystemPrompt = void 0;
+exports.StructuredChallengeService = exports.DEFAULT_CHALLENGE_MODEL = exports.hasSignificantFrameChange = exports.estimateByteDifferenceRatio = exports.computeFrameHash = exports.ScreenFrameGate = exports.safeParseWithSchema = exports.parseLogicChallenge = exports.parseExerciseFeedback = exports.parseBugAnalysis = exports.extractJsonPayload = exports.LogicChallengeSchema = exports.ExerciseFeedbackSchema = exports.ChallengeDifficultySchema = exports.BugSeveritySchema = exports.BugAnalysisSchema = exports.parseAudioSampleRate = exports.buildPermissiveSafetySettings = exports.GeminiLiveSessionManager = exports.DEFAULT_OUTPUT_SAMPLE_RATE = exports.DEFAULT_GEMINI_LIVE_MODEL = exports.ContextAggregator = exports.getSupportedTutorModes = exports.buildSystemPrompt = void 0;
 var prompts_1 = require("./prompts");
 Object.defineProperty(exports, "buildSystemPrompt", { enumerable: true, get: function () { return prompts_1.buildSystemPrompt; } });
 Object.defineProperty(exports, "getSupportedTutorModes", { enumerable: true, get: function () { return prompts_1.getSupportedTutorModes; } });
@@ -28,4 +28,7 @@ Object.defineProperty(exports, "ScreenFrameGate", { enumerable: true, get: funct
 Object.defineProperty(exports, "computeFrameHash", { enumerable: true, get: function () { return frameDiff_1.computeFrameHash; } });
 Object.defineProperty(exports, "estimateByteDifferenceRatio", { enumerable: true, get: function () { return frameDiff_1.estimateByteDifferenceRatio; } });
 Object.defineProperty(exports, "hasSignificantFrameChange", { enumerable: true, get: function () { return frameDiff_1.hasSignificantFrameChange; } });
+var challengeService_1 = require("./challengeService");
+Object.defineProperty(exports, "DEFAULT_CHALLENGE_MODEL", { enumerable: true, get: function () { return challengeService_1.DEFAULT_CHALLENGE_MODEL; } });
+Object.defineProperty(exports, "StructuredChallengeService", { enumerable: true, get: function () { return challengeService_1.StructuredChallengeService; } });
 //# sourceMappingURL=index.js.map

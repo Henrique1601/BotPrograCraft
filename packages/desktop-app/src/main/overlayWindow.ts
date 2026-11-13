@@ -6,6 +6,7 @@ export interface OverlayWindowOptions {
   preloadPath: string;
   rendererHtmlPath: string;
   devServerUrl?: string;
+  iconPath?: string;
 }
 
 export function createOverlayWindow(options: OverlayWindowOptions): BrowserWindow {
@@ -21,6 +22,7 @@ export function createOverlayWindow(options: OverlayWindowOptions): BrowserWindo
     minHeight: 420,
     x: workArea.x + workArea.width - width - margin,
     y: workArea.y + workArea.height - height - margin,
+    icon: options.iconPath,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
