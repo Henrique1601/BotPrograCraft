@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { saveStudyReportToFile } from '../src/reportExporter';
 import { captureWindowsScreenJpeg } from '../src/screenFallback';
 import { createBotPrograCraftMcpServer, type CreateMcpServerOptions } from '../src/server';
 import {
@@ -76,12 +77,13 @@ describe('@botprogracraft/mcp-server', () => {
     assert.equal(readLatestFrame(), null);
   });
 
-  it('exposes all 6 MCP tools', async () => {
+  it('exposes all 7 MCP tools', async () => {
     const { client, close } = await createConnectedClient();
     try {
       const result = await client.listTools();
       const names = result.tools.map((t) => t.name).sort();
       assert.deepEqual(names, [
+        'export_study_report',
         'get_learning_progress',
         'get_live_ide_context',
         'get_live_screen',
@@ -398,6 +400,69 @@ describe('@botprogracraft/mcp-server', () => {
       assert.equal(parsed.recordedAttempt.title, 'Sum Two Numbers');
       assert.equal(parsed.recordedAttempt.passed, true);
       assert.equal(parsed.recordedAttempt.score, 100);
+    } finally {
+      await close();
+    }
+  });
+
+  it('export_study_report formats Obsidian Markdown, saves safely, and blocks path traversal', async () => {
+    const repo = openProgressRepository();
+    try {
+      repo.recordAttempt({
+        title: 'Binary Search',
+        mode: 'logic-challenge',
+        languageId: 'typescript',
+        prompt: 'Find target index',
+        userCode: 'return -1;',
+        passed: true,
+        score: 95,
+      });
+      repo.recordRecurringError({
+        errorSignature: 'ReferenceError: x is not defined',
+        languageId: 'javascript',
+        filePath: 'src/index.js',
+      });
+    } finally {
+      repo.close();
+    }
+
+    assert.throws(
+      () => saveStudyReportToFile('# test', { fileName: '../escape.md' }),
+      /path traversal/i,
+    );
+    assert.throws(
+      () => saveStudyReportToFile('# test', { fileName: 'sub/nested.md' }),
+      /path traversal/i,
+    );
+
+    const { client, close } = await createConnectedClient();
+    try {
+      const noSaveRes = await client.callTool({
+        name: 'export_study_report',
+        arguments: { saveToFile: false, limit: 5 },
+      });
+      const noSaveJson = JSON.parse(
+        (getToolContent(noSaveRes)[0] as { type: 'text'; text: string }).text,
+      ) as { markdown: string; savedPath: string | null };
+
+      assert.equal(noSaveJson.savedPath, null);
+      assert.match(noSaveJson.markdown, /# BotPrograCraft Study Report/);
+      assert.match(noSaveJson.markdown, /Binary Search/);
+      assert.match(noSaveJson.markdown, /ReferenceError: x is not defined/);
+
+      const saveRes = await client.callTool({
+        name: 'export_study_report',
+        arguments: { saveToFile: true },
+      });
+      const saveJson = JSON.parse(
+        (getToolContent(saveRes)[0] as { type: 'text'; text: string }).text,
+      ) as { markdown: string; savedPath: string | null };
+
+      assert.ok(saveJson.savedPath);
+      const expectedReportsDir = path.resolve(tempHome, 'reports');
+      assert.ok(saveJson.savedPath.startsWith(expectedReportsDir));
+      assert.ok(fs.existsSync(saveJson.savedPath));
+      assert.equal(fs.readFileSync(saveJson.savedPath, 'utf8'), saveJson.markdown);
     } finally {
       await close();
     }

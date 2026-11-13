@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const node_test_1 = require("node:test");
 const strict_1 = __importDefault(require("node:assert/strict"));
 const challengeService_1 = require("../src/challengeService");
+const ollamaClient_1 = require("../src/ollamaClient");
 const SAMPLE_CHALLENGE = {
     title: 'Soma de Dois Números',
     difficulty: 'easy',
@@ -15,7 +16,7 @@ const SAMPLE_CHALLENGE = {
     starterCode: 'function twoSum(nums: number[], target: number): [number, number] {\n  // TODO\n}',
 };
 (0, node_test_1.describe)('StructuredChallengeService', () => {
-    (0, node_test_1.it)('generates and validates a LogicChallenge from fenced JSON', async () => {
+    (0, node_test_1.it)('generates and validates a LogicChallenge from fenced JSON via Gemini', async () => {
         const service = new challengeService_1.StructuredChallengeService({
             generateFn: async ({ prompt, unfiltered }) => {
                 strict_1.default.match(prompt, /Difficulty: "easy"/);
@@ -29,7 +30,8 @@ const SAMPLE_CHALLENGE = {
             languageId: 'typescript',
             topic: 'arrays',
         });
-        strict_1.default.deepEqual(challenge, SAMPLE_CHALLENGE);
+        strict_1.default.equal(challenge.title, SAMPLE_CHALLENGE.title);
+        strict_1.default.equal(challenge.source, 'gemini');
     });
     (0, node_test_1.it)('retries once when first response fails schema validation', async () => {
         let calls = 0;
@@ -51,16 +53,55 @@ const SAMPLE_CHALLENGE = {
         strict_1.default.equal(calls, 2);
         strict_1.default.equal(challenge.title, SAMPLE_CHALLENGE.title);
     });
-    (0, node_test_1.it)('throws clear error when API key is missing or validation fails after retries', async () => {
-        const noKeyService = new challengeService_1.StructuredChallengeService({ apiKey: '' });
-        await strict_1.default.rejects(() => noKeyService.generateLogicChallenge({ difficulty: 'medium', languageId: 'python' }), /Gemini API key is required/);
-        const badService = new challengeService_1.StructuredChallengeService({
-            maxAttempts: 2,
-            generateFn: async () => 'not json at all',
+    (0, node_test_1.it)('falls back to Ollama when Gemini is missing or fails, then to curated offline bank', async () => {
+        const ollamaHealthy = new ollamaClient_1.OllamaClient({
+            fetchFn: async (url) => {
+                if (url.endsWith('/api/tags')) {
+                    return {
+                        ok: true,
+                        status: 200,
+                        statusText: 'OK',
+                        json: async () => ({ models: [{ name: 'qwen2.5-coder:7b' }] }),
+                    };
+                }
+                return {
+                    ok: true,
+                    status: 200,
+                    statusText: 'OK',
+                    json: async () => ({
+                        message: { content: JSON.stringify(SAMPLE_CHALLENGE) },
+                    }),
+                };
+            },
         });
-        await strict_1.default.rejects(() => badService.generateLogicChallenge({ difficulty: 'hard', languageId: 'typescript' }), /Failed to parse LogicChallenge after 2 attempt\(s\)/);
+        const ollamaFallbackService = new challengeService_1.StructuredChallengeService({
+            apiKey: '',
+            ollamaClient: ollamaHealthy,
+        });
+        const fromOllama = await ollamaFallbackService.generateLogicChallenge({
+            difficulty: 'easy',
+            languageId: 'typescript',
+        });
+        strict_1.default.equal(fromOllama.source, 'ollama');
+        strict_1.default.equal(fromOllama.title, SAMPLE_CHALLENGE.title);
+        const offlineService = new challengeService_1.StructuredChallengeService({
+            apiKey: '',
+            ollamaClient: new ollamaClient_1.OllamaClient({
+                fetchFn: async () => {
+                    throw new Error('ECONNREFUSED');
+                },
+            }),
+        });
+        const fromCurated = await offlineService.generateLogicChallenge({
+            difficulty: 'medium',
+            languageId: 'typescript',
+            topic: 'arrays',
+        });
+        strict_1.default.equal(fromCurated.source, 'curated');
+        strict_1.default.equal(fromCurated.difficulty, 'medium');
+        strict_1.default.ok(fromCurated.testCases && fromCurated.testCases.length > 0);
     });
-    (0, node_test_1.it)('evaluates user solution and forwards unfiltered flag', async () => {
+    (0, node_test_1.it)('evaluates user solution via Gemini, or falls back to runExerciseCheck when testCases provided without API key', async () => {
         const service = new challengeService_1.StructuredChallengeService({
             generateFn: async ({ prompt, unfiltered }) => {
                 strict_1.default.equal(unfiltered, true);
@@ -82,7 +123,23 @@ const SAMPLE_CHALLENGE = {
         });
         strict_1.default.equal(feedback.passed, true);
         strict_1.default.equal(feedback.score, 95);
-        strict_1.default.equal(feedback.strengths.length, 1);
+        const offlineService = new challengeService_1.StructuredChallengeService({ apiKey: '' });
+        const offlineFeedback = await offlineService.evaluateExerciseSolution({
+            challenge: SAMPLE_CHALLENGE,
+            userCode: `const fs = require('node:fs'); console.log(Number(fs.readFileSync(0, 'utf8').trim()) * 2);`,
+            languageId: 'javascript',
+            testCases: [
+                { input: '4', expectedOutput: '8' },
+                { input: '5', expectedOutput: '10' },
+            ],
+        });
+        strict_1.default.equal(offlineFeedback.passed, true);
+        strict_1.default.equal(offlineFeedback.score, 100);
+        await strict_1.default.rejects(() => offlineService.evaluateExerciseSolution({
+            challenge: SAMPLE_CHALLENGE,
+            userCode: 'const x = 1;',
+            languageId: 'typescript',
+        }), /Gemini API key is required/);
         await strict_1.default.rejects(() => service.evaluateExerciseSolution({
             challenge: SAMPLE_CHALLENGE,
             userCode: '   ',

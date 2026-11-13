@@ -13,7 +13,7 @@ import type {
   ExerciseCheckResult,
   ExerciseFeedback,
   ExerciseLanguage,
-  LogicChallenge,
+  GeneratedLogicChallenge,
   OllamaHealthResult,
 } from '@botprogracraft/ai-core';
 import type { TranscriptEntry } from '../main/ipcTypes';
@@ -167,9 +167,8 @@ export function App(): React.ReactElement {
   const [challengeDifficulty, setChallengeDifficulty] =
     useState<ChallengeDifficulty>('medium');
   const [challengeTopic, setChallengeTopic] = useState('');
-  const [activeChallenge, setActiveChallenge] = useState<LogicChallenge | null>(
-    null,
-  );
+  const [activeChallenge, setActiveChallenge] =
+    useState<GeneratedLogicChallenge | null>(null);
   const [solutionCode, setSolutionCode] = useState('');
   const [challengeFeedback, setChallengeFeedback] =
     useState<ExerciseFeedback | null>(null);
@@ -179,6 +178,10 @@ export function App(): React.ReactElement {
   const [exerciseResult, setExerciseResult] =
     useState<ExerciseCheckResult | null>(null);
   const [exerciseRunning, setExerciseRunning] = useState(false);
+
+  // MCP installer & report export feedback
+  const [mcpStatusMsg, setMcpStatusMsg] = useState<string | null>(null);
+  const [reportStatusMsg, setReportStatusMsg] = useState<string | null>(null);
 
   // AI Provider (Gemini Live vs Ollama Local)
   const [aiProvider, setAiProvider] = useState<AiProviderType>('gemini-live');
@@ -232,6 +235,9 @@ export function App(): React.ReactElement {
       await audioCapture.startCapture();
     }
   }, [aiProvider, audioCapture, stopPlayback, webSpeech]);
+
+  const handleToggleVoiceRef = useRef(handleToggleVoice);
+  handleToggleVoiceRef.current = handleToggleVoice;
 
   const loadProgress = useCallback(async () => {
     const getStats = window.botprogracraft?.getProgressStats;
@@ -342,7 +348,7 @@ export function App(): React.ReactElement {
       window.botprogracraft.onScreenFrame(setLatestFrame),
       window.botprogracraft.onScreenFramePreview(setFramePreview),
       window.botprogracraft.onPushToTalkToggle(() => {
-        void handleToggleVoice();
+        void handleToggleVoiceRef.current();
       }),
     ];
 
@@ -354,7 +360,6 @@ export function App(): React.ReactElement {
     };
   }, [
     enqueueAudio,
-    handleToggleVoice,
     refreshCaptureSources,
     refreshOllamaHealth,
     speak,
@@ -460,10 +465,14 @@ export function App(): React.ReactElement {
           : langId === 'javascript' || langId === 'javascriptreact'
             ? 'javascript'
             : 'typescript';
+      const testCases =
+        activeChallenge?.testCases && activeChallenge.testCases.length > 0
+          ? activeChallenge.testCases
+          : [{ input: '', expectedOutput: '' }];
       const result = await window.botprogracraft.runExerciseCheck({
         language,
         code: solutionCode,
-        testCases: [{ input: '', expectedOutput: '' }],
+        testCases,
       });
       setExerciseResult(result);
     } catch (err) {
@@ -472,6 +481,30 @@ export function App(): React.ReactElement {
       );
     } finally {
       setExerciseRunning(false);
+    }
+  };
+
+  const handleInstallMcp = async () => {
+    setMcpStatusMsg(null);
+    try {
+      const res = await window.botprogracraft.installAntigravityMcp();
+      setMcpStatusMsg(`MCP conectado em ${res.configPath}`);
+    } catch (err) {
+      setMcpStatusMsg(
+        `Erro MCP: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  };
+
+  const handleExportReport = async () => {
+    setReportStatusMsg(null);
+    try {
+      const res = await window.botprogracraft.exportStudyReport();
+      setReportStatusMsg(`Relatório salvo em ${res.savedPath}`);
+    } catch (err) {
+      setReportStatusMsg(
+        `Erro ao exportar: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
@@ -933,17 +966,31 @@ export function App(): React.ReactElement {
                 Histórico local de sessões e tentativas
               </div>
             </div>
-            <button
-              type="button"
-              className="pill-btn"
-              onClick={() => void loadProgress()}
-              disabled={progressLoading}
-              title="Atualizar métricas"
-            >
-              <SyncIcon />
-              <span>{progressLoading ? '...' : 'Atualizar'}</span>
-            </button>
+            <div style={{ display: 'flex', gap: '6px' }}>
+              <button
+                type="button"
+                className="pill-btn"
+                onClick={() => void handleExportReport()}
+                title="Exportar relatório de estudos em Markdown"
+              >
+                <span>Exportar Relatório (.md)</span>
+              </button>
+              <button
+                type="button"
+                className="pill-btn"
+                onClick={() => void loadProgress()}
+                disabled={progressLoading}
+                title="Atualizar métricas"
+              >
+                <SyncIcon />
+                <span>{progressLoading ? '...' : 'Atualizar'}</span>
+              </button>
+            </div>
           </div>
+
+          {reportStatusMsg && (
+            <div className="progress-notice">{reportStatusMsg}</div>
+          )}
 
           {!progressAvailable && (
             <div className="progress-notice">
@@ -1200,17 +1247,32 @@ export function App(): React.ReactElement {
             </button>
           </div>
 
-          <button
-            type="button"
-            className="pill-btn"
-            onClick={() => void window.botprogracraft.requestIdeContext()}
-            disabled={!ideConnected}
-            title="Sync latest context from IDE"
-          >
-            <SyncIcon />
-            <span>Sync</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <button
+              type="button"
+              className="pill-btn"
+              onClick={() => void handleInstallMcp()}
+              title="Registrar servidor MCP no Antigravity IDE"
+            >
+              <span>Conectar MCP</span>
+            </button>
+
+            <button
+              type="button"
+              className="pill-btn"
+              onClick={() => void window.botprogracraft.requestIdeContext()}
+              disabled={!ideConnected}
+              title="Sync latest context from IDE"
+            >
+              <SyncIcon />
+              <span>Sync</span>
+            </button>
+          </div>
         </div>
+
+        {mcpStatusMsg && (
+          <div className="hud-alert hud-alert--warn">{mcpStatusMsg}</div>
+        )}
 
         {!apiKeyConfigured && (
           <div className="hud-alert hud-alert--warn">

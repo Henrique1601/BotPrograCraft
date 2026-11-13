@@ -63,10 +63,20 @@ export {
   StructuredChallengeService,
   type ChallengeGenerateFn,
   type ChallengeGenerateRequest,
+  type ChallengeSource,
   type EvaluateSolutionParams,
   type GenerateChallengeParams,
+  type GeneratedLogicChallenge,
   type StructuredChallengeServiceOptions,
 } from './challengeService';
+
+export {
+  CURATED_CHALLENGES,
+  getCuratedChallenge,
+  listCuratedChallenges,
+  type CuratedChallenge,
+  type GetCuratedChallengeParams,
+} from './challengeBank';
 
 export {
   DEFAULT_OLLAMA_BASE_URL,

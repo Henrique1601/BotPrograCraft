@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.runExerciseCheck = exports.OllamaClient = exports.DEFAULT_OLLAMA_MODEL = exports.DEFAULT_OLLAMA_BASE_URL = exports.StructuredChallengeService = exports.DEFAULT_CHALLENGE_MODEL = exports.hasSignificantFrameChange = exports.estimateByteDifferenceRatio = exports.computeFrameHash = exports.ScreenFrameGate = exports.safeParseWithSchema = exports.parseLogicChallenge = exports.parseExerciseFeedback = exports.parseBugAnalysis = exports.extractJsonPayload = exports.LogicChallengeSchema = exports.ExerciseFeedbackSchema = exports.ChallengeDifficultySchema = exports.BugSeveritySchema = exports.BugAnalysisSchema = exports.parseAudioSampleRate = exports.buildPermissiveSafetySettings = exports.GeminiLiveSessionManager = exports.DEFAULT_OUTPUT_SAMPLE_RATE = exports.DEFAULT_GEMINI_LIVE_MODEL = exports.ContextAggregator = exports.getSupportedTutorModes = exports.buildSystemPrompt = void 0;
+exports.runExerciseCheck = exports.OllamaClient = exports.DEFAULT_OLLAMA_MODEL = exports.DEFAULT_OLLAMA_BASE_URL = exports.listCuratedChallenges = exports.getCuratedChallenge = exports.CURATED_CHALLENGES = exports.StructuredChallengeService = exports.DEFAULT_CHALLENGE_MODEL = exports.hasSignificantFrameChange = exports.estimateByteDifferenceRatio = exports.computeFrameHash = exports.ScreenFrameGate = exports.safeParseWithSchema = exports.parseLogicChallenge = exports.parseExerciseFeedback = exports.parseBugAnalysis = exports.extractJsonPayload = exports.LogicChallengeSchema = exports.ExerciseFeedbackSchema = exports.ChallengeDifficultySchema = exports.BugSeveritySchema = exports.BugAnalysisSchema = exports.parseAudioSampleRate = exports.buildPermissiveSafetySettings = exports.GeminiLiveSessionManager = exports.DEFAULT_OUTPUT_SAMPLE_RATE = exports.DEFAULT_GEMINI_LIVE_MODEL = exports.ContextAggregator = exports.getSupportedTutorModes = exports.buildSystemPrompt = void 0;
 var prompts_1 = require("./prompts");
 Object.defineProperty(exports, "buildSystemPrompt", { enumerable: true, get: function () { return prompts_1.buildSystemPrompt; } });
 Object.defineProperty(exports, "getSupportedTutorModes", { enumerable: true, get: function () { return prompts_1.getSupportedTutorModes; } });
@@ -31,6 +31,10 @@ Object.defineProperty(exports, "hasSignificantFrameChange", { enumerable: true, 
 var challengeService_1 = require("./challengeService");
 Object.defineProperty(exports, "DEFAULT_CHALLENGE_MODEL", { enumerable: true, get: function () { return challengeService_1.DEFAULT_CHALLENGE_MODEL; } });
 Object.defineProperty(exports, "StructuredChallengeService", { enumerable: true, get: function () { return challengeService_1.StructuredChallengeService; } });
+var challengeBank_1 = require("./challengeBank");
+Object.defineProperty(exports, "CURATED_CHALLENGES", { enumerable: true, get: function () { return challengeBank_1.CURATED_CHALLENGES; } });
+Object.defineProperty(exports, "getCuratedChallenge", { enumerable: true, get: function () { return challengeBank_1.getCuratedChallenge; } });
+Object.defineProperty(exports, "listCuratedChallenges", { enumerable: true, get: function () { return challengeBank_1.listCuratedChallenges; } });
 var ollamaClient_1 = require("./ollamaClient");
 Object.defineProperty(exports, "DEFAULT_OLLAMA_BASE_URL", { enumerable: true, get: function () { return ollamaClient_1.DEFAULT_OLLAMA_BASE_URL; } });
 Object.defineProperty(exports, "DEFAULT_OLLAMA_MODEL", { enumerable: true, get: function () { return ollamaClient_1.DEFAULT_OLLAMA_MODEL; } });

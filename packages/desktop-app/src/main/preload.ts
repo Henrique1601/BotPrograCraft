@@ -9,7 +9,7 @@ import type {
 import type {
   ChallengeDifficulty,
   ExerciseCheckParams,
-  LogicChallenge,
+  GeneratedLogicChallenge,
 } from '@botprogracraft/ai-core';
 import type {
   DesktopBridgeApi,
@@ -58,10 +58,14 @@ const api: DesktopBridgeApi = {
     ipcRenderer.invoke('desktop:list-recurring-errors', limit),
   generateLogicChallenge: (difficulty: ChallengeDifficulty, topic?: string) =>
     ipcRenderer.invoke('desktop:generate-logic-challenge', difficulty, topic),
-  evaluateSolution: (challenge: LogicChallenge, userCode: string) =>
+  evaluateSolution: (challenge: GeneratedLogicChallenge, userCode: string) =>
     ipcRenderer.invoke('desktop:evaluate-solution', challenge, userCode),
   runExerciseCheck: (params: ExerciseCheckParams) =>
     ipcRenderer.invoke('desktop:run-exercise-check', params),
+  installAntigravityMcp: () =>
+    ipcRenderer.invoke('desktop:install-antigravity-mcp'),
+  exportStudyReport: () =>
+    ipcRenderer.invoke('desktop:export-study-report'),
   onIdeConnection: (cb) =>
     subscribe<[connected: boolean]>('event:ide-connection', cb),
   onIdeContext: (cb) =>

@@ -6,6 +6,7 @@ const ai_core_1 = require("@botprogracraft/ai-core");
 const mcp_js_1 = require("@modelcontextprotocol/sdk/server/mcp.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const zod_1 = require("zod");
+const reportExporter_1 = require("./reportExporter");
 const screenFallback_1 = require("./screenFallback");
 const stateReader_1 = require("./stateReader");
 const TUTOR_MODE_ENUM = zod_1.z.enum([
@@ -71,13 +72,26 @@ const RunExerciseCheckInputSchema = zod_1.z.object({
     mode: zod_1.z.string().min(1).optional().describe('Tutoring mode (required when recordAttempt is true)'),
     prompt: zod_1.z.string().optional().describe('Optional exercise prompt stored with the attempt'),
 });
+const ExportStudyReportInputSchema = zod_1.z.object({
+    saveToFile: zod_1.z
+        .boolean()
+        .optional()
+        .describe('When true, saves the Markdown report inside <BOTPROGRACRAFT_HOME>/reports/'),
+    limit: zod_1.z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe('Maximum number of recent attempts and recurring errors to include (default 10)'),
+});
 /**
- * Creates and configures the BotPrograCraft MCP server with all 6 tools.
+ * Creates and configures the BotPrograCraft MCP server with all 7 tools.
  */
 function createBotPrograCraftMcpServer(options = {}) {
     const server = new mcp_js_1.McpServer({
         name: 'botprogracraft',
-        version: '0.3.0',
+        version: '0.4.0',
     });
     const captureScreenFallback = options.captureScreenFallback ?? ((homeDir) => (0, screenFallback_1.captureWindowsScreenJpeg)({ homeDir }));
     server.registerTool('get_live_ide_context', {
@@ -282,6 +296,39 @@ function createBotPrograCraftMcpServer(options = {}) {
                 },
             ],
         };
+    });
+    server.registerTool('export_study_report', {
+        title: 'Export Study Report',
+        description: 'Generates an Obsidian-friendly Markdown study report from BotPrograCraft learning progress and optionally saves it inside <BOTPROGRACRAFT_HOME>/reports/.',
+        inputSchema: ExportStudyReportInputSchema,
+    }, async (args) => {
+        const parsed = ExportStudyReportInputSchema.parse(args ?? {});
+        const limit = parsed.limit ?? 10;
+        const repo = (0, stateReader_1.openProgressRepository)(options.homeDir);
+        try {
+            const stats = repo.getStats();
+            const recentAttempts = repo.listRecentAttempts({ limit });
+            const recurringErrors = repo.getTopRecurringErrors({ limit });
+            const markdown = (0, reportExporter_1.formatStudyReportMarkdown)({
+                stats,
+                recentAttempts,
+                recurringErrors,
+            });
+            const savedPath = parsed.saveToFile
+                ? (0, reportExporter_1.saveStudyReportToFile)(markdown, { homeDir: options.homeDir })
+                : null;
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({ markdown, savedPath }, null, 2),
+                    },
+                ],
+            };
+        }
+        finally {
+            repo.close();
+        }
     });
     return server;
 }

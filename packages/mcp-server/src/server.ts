@@ -2,6 +2,10 @@ import { buildSystemPrompt, runExerciseCheck } from '@botprogracraft/ai-core';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import {
+  formatStudyReportMarkdown,
+  saveStudyReportToFile,
+} from './reportExporter';
 import { captureWindowsScreenJpeg } from './screenFallback';
 import {
   getBotPrograCraftHome,
@@ -86,13 +90,27 @@ const RunExerciseCheckInputSchema = z.object({
   prompt: z.string().optional().describe('Optional exercise prompt stored with the attempt'),
 });
 
+const ExportStudyReportInputSchema = z.object({
+  saveToFile: z
+    .boolean()
+    .optional()
+    .describe('When true, saves the Markdown report inside <BOTPROGRACRAFT_HOME>/reports/'),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .describe('Maximum number of recent attempts and recurring errors to include (default 10)'),
+});
+
 /**
- * Creates and configures the BotPrograCraft MCP server with all 6 tools.
+ * Creates and configures the BotPrograCraft MCP server with all 7 tools.
  */
 export function createBotPrograCraftMcpServer(options: CreateMcpServerOptions = {}): McpServer {
   const server = new McpServer({
     name: 'botprogracraft',
-    version: '0.3.0',
+    version: '0.4.0',
   });
   const captureScreenFallback =
     options.captureScreenFallback ?? ((homeDir?: string) => captureWindowsScreenJpeg({ homeDir }));
@@ -366,6 +384,47 @@ export function createBotPrograCraftMcpServer(options: CreateMcpServerOptions = 
           },
         ],
       };
+    },
+  );
+
+  server.registerTool(
+    'export_study_report',
+    {
+      title: 'Export Study Report',
+      description:
+        'Generates an Obsidian-friendly Markdown study report from BotPrograCraft learning progress and optionally saves it inside <BOTPROGRACRAFT_HOME>/reports/.',
+      inputSchema: ExportStudyReportInputSchema,
+    },
+    async (args) => {
+      const parsed = ExportStudyReportInputSchema.parse(args ?? {});
+      const limit = parsed.limit ?? 10;
+      const repo = openProgressRepository(options.homeDir);
+
+      try {
+        const stats = repo.getStats();
+        const recentAttempts = repo.listRecentAttempts({ limit });
+        const recurringErrors = repo.getTopRecurringErrors({ limit });
+        const markdown = formatStudyReportMarkdown({
+          stats,
+          recentAttempts,
+          recurringErrors,
+        });
+
+        const savedPath = parsed.saveToFile
+          ? saveStudyReportToFile(markdown, { homeDir: options.homeDir })
+          : null;
+
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({ markdown, savedPath }, null, 2),
+            },
+          ],
+        };
+      } finally {
+        repo.close();
+      }
     },
   );
 

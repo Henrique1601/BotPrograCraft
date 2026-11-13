@@ -35,7 +35,8 @@ import {
   type ExerciseCheckParams,
   type ExerciseCheckResult,
   type ExerciseFeedback,
-  type LogicChallenge,
+  type ExerciseTestCase,
+  type GeneratedLogicChallenge,
   type OllamaHealthResult,
 } from '@botprogracraft/ai-core';
 import { ProgressRepository } from '@botprogracraft/storage';
@@ -46,8 +47,10 @@ import type {
   RecentAttemptSummary,
   RecurringErrorSummary,
   ScreenFramePreview,
+  StudyReportExportResult,
   TranscriptEntry,
 } from './ipcTypes';
+import { installAntigravityMcpConfig } from './mcpInstaller';
 import { createOverlayWindow } from './overlayWindow';
 import {
   capturePrimaryScreenFrame,
@@ -85,6 +88,8 @@ const ollamaClient = new OllamaClient({
 });
 const challengeService = new StructuredChallengeService({
   apiKey: process.env.GEMINI_API_KEY ?? '',
+  ollamaClient,
+  ollamaModel: currentOllamaModel,
 });
 const screenFrameGate = new ScreenFrameGate({
   minIntervalMs: 1000,
@@ -644,7 +649,7 @@ function registerIpcHandlers(): void {
       _event,
       difficulty: unknown,
       topic?: unknown,
-    ): Promise<LogicChallenge> => {
+    ): Promise<GeneratedLogicChallenge> => {
       const parsedDifficulty = ChallengeDifficultySchema.safeParse(difficulty);
       if (!parsedDifficulty.success) {
         throw new Error('Invalid difficulty parameter.');
@@ -677,10 +682,24 @@ function registerIpcHandlers(): void {
       if (typeof userCode !== 'string' || !userCode.trim()) {
         throw new Error('Solution code must not be empty.');
       }
+      const rawTestCases = (challenge as { testCases?: unknown }).testCases;
+      const testCases = Array.isArray(rawTestCases)
+        ? (rawTestCases.filter(
+            (tc): tc is ExerciseTestCase =>
+              tc !== null &&
+              typeof tc === 'object' &&
+              typeof (tc as ExerciseTestCase).input === 'string' &&
+              typeof (tc as ExerciseTestCase).expectedOutput === 'string',
+          ))
+        : undefined;
+
       const languageId =
         contextAggregator.getIdeContext()?.languageId || 'typescript';
       const feedback = await challengeService.evaluateExerciseSolution({
-        challenge: parsedChallenge.data,
+        challenge: {
+          ...parsedChallenge.data,
+          ...(testCases && testCases.length > 0 ? { testCases } : {}),
+        },
         userCode,
         languageId,
         unfiltered: currentTutorMode === 'direct',
@@ -737,6 +756,80 @@ function registerIpcHandlers(): void {
         testCases: candidate.testCases,
         timeoutMs: candidate.timeoutMs,
       });
+    },
+  );
+
+  ipcMain.handle('desktop:install-antigravity-mcp', () => {
+    return installAntigravityMcpConfig();
+  });
+
+  ipcMain.handle(
+    'desktop:export-study-report',
+    (): StudyReportExportResult => {
+      const now = new Date();
+      const stats = progressRepo?.getStats() ?? {
+        totalAttempts: 0,
+        passedAttempts: 0,
+        passRate: 0,
+        averageScore: 0,
+        totalRecurringErrors: 0,
+        totalErrorOccurrences: 0,
+        totalMessages: 0,
+        attemptsByMode: {},
+        attemptsByLanguage: {},
+      };
+      const recentAttempts = progressRepo?.listRecentAttempts({ limit: 10 }) ?? [];
+      const recurringErrors = progressRepo?.getTopRecurringErrors({ limit: 10 }) ?? [];
+
+      const passRatePercent = Math.round(stats.passRate * 100);
+      const lines: string[] = [
+        '# BotPrograCraft — Relatório de Estudos',
+        '',
+        `> Gerado em: ${now.toISOString()}`,
+        '',
+        '## Resumo Geral',
+        '',
+        `- **Tentativas:** ${stats.totalAttempts} (${stats.passedAttempts} aprovadas · ${passRatePercent}% sucesso)`,
+        `- **Nota Média:** ${stats.averageScore.toFixed(1)}%`,
+        `- **Mensagens Registradas:** ${stats.totalMessages}`,
+        `- **Erros Recorrentes Únicos:** ${stats.totalRecurringErrors} (${stats.totalErrorOccurrences} ocorrências)`,
+        '',
+        '## Tentativas Recentes',
+        '',
+      ];
+
+      if (recentAttempts.length === 0) {
+        lines.push('_Nenhuma tentativa registrada ainda._');
+      } else {
+        lines.push('| Desafio | Modo | Linguagem | Nota | Status | Data |');
+        lines.push('| --- | --- | --- | --- | --- | --- |');
+        for (const a of recentAttempts) {
+          lines.push(
+            `| ${a.title.replace(/\|/g, '\\|')} | ${a.mode} | ${a.languageId} | ${a.score}% | ${a.passed ? 'Aprovado' : 'Revisar'} | ${a.createdAt} |`,
+          );
+        }
+      }
+
+      lines.push('', '## Top Erros Recorrentes', '');
+      if (recurringErrors.length === 0) {
+        lines.push('_Nenhum erro recorrente registrado._');
+      } else {
+        for (const err of recurringErrors) {
+          const fileSuffix = err.filePath ? ` — \`${err.filePath}\`` : '';
+          lines.push(
+            `- **×${err.occurrenceCount}** \`${err.languageId}\` — ${err.errorSignature}${fileSuffix}`,
+          );
+        }
+      }
+
+      const markdown = lines.join('\n') + '\n';
+      const reportsDir = path.join(getBotPrograCraftHome(), 'reports');
+      fs.mkdirSync(reportsDir, { recursive: true });
+      const stamp = now.toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const savedPath = path.join(reportsDir, `study-report-${stamp}.md`);
+      atomicWriteFileSync(savedPath, markdown);
+
+      return { markdown, savedPath };
     },
   );
 }

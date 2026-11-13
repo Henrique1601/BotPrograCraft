@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { StructuredChallengeService } from '../src/challengeService';
+import { OllamaClient } from '../src/ollamaClient';
 import type { LogicChallenge } from '../src/schemas';
 
 const SAMPLE_CHALLENGE: LogicChallenge = {
@@ -13,7 +14,7 @@ const SAMPLE_CHALLENGE: LogicChallenge = {
 };
 
 describe('StructuredChallengeService', () => {
-  it('generates and validates a LogicChallenge from fenced JSON', async () => {
+  it('generates and validates a LogicChallenge from fenced JSON via Gemini', async () => {
     const service = new StructuredChallengeService({
       generateFn: async ({ prompt, unfiltered }) => {
         assert.match(prompt, /Difficulty: "easy"/);
@@ -29,7 +30,8 @@ describe('StructuredChallengeService', () => {
       topic: 'arrays',
     });
 
-    assert.deepEqual(challenge, SAMPLE_CHALLENGE);
+    assert.equal(challenge.title, SAMPLE_CHALLENGE.title);
+    assert.equal(challenge.source, 'gemini');
   });
 
   it('retries once when first response fails schema validation', async () => {
@@ -55,24 +57,58 @@ describe('StructuredChallengeService', () => {
     assert.equal(challenge.title, SAMPLE_CHALLENGE.title);
   });
 
-  it('throws clear error when API key is missing or validation fails after retries', async () => {
-    const noKeyService = new StructuredChallengeService({ apiKey: '' });
-    await assert.rejects(
-      () => noKeyService.generateLogicChallenge({ difficulty: 'medium', languageId: 'python' }),
-      /Gemini API key is required/,
-    );
-
-    const badService = new StructuredChallengeService({
-      maxAttempts: 2,
-      generateFn: async () => 'not json at all',
+  it('falls back to Ollama when Gemini is missing or fails, then to curated offline bank', async () => {
+    const ollamaHealthy = new OllamaClient({
+      fetchFn: async (url) => {
+        if (url.endsWith('/api/tags')) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            json: async () => ({ models: [{ name: 'qwen2.5-coder:7b' }] }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({
+            message: { content: JSON.stringify(SAMPLE_CHALLENGE) },
+          }),
+        };
+      },
     });
-    await assert.rejects(
-      () => badService.generateLogicChallenge({ difficulty: 'hard', languageId: 'typescript' }),
-      /Failed to parse LogicChallenge after 2 attempt\(s\)/,
-    );
+
+    const ollamaFallbackService = new StructuredChallengeService({
+      apiKey: '',
+      ollamaClient: ollamaHealthy,
+    });
+    const fromOllama = await ollamaFallbackService.generateLogicChallenge({
+      difficulty: 'easy',
+      languageId: 'typescript',
+    });
+    assert.equal(fromOllama.source, 'ollama');
+    assert.equal(fromOllama.title, SAMPLE_CHALLENGE.title);
+
+    const offlineService = new StructuredChallengeService({
+      apiKey: '',
+      ollamaClient: new OllamaClient({
+        fetchFn: async () => {
+          throw new Error('ECONNREFUSED');
+        },
+      }),
+    });
+    const fromCurated = await offlineService.generateLogicChallenge({
+      difficulty: 'medium',
+      languageId: 'typescript',
+      topic: 'arrays',
+    });
+    assert.equal(fromCurated.source, 'curated');
+    assert.equal(fromCurated.difficulty, 'medium');
+    assert.ok(fromCurated.testCases && fromCurated.testCases.length > 0);
   });
 
-  it('evaluates user solution and forwards unfiltered flag', async () => {
+  it('evaluates user solution via Gemini, or falls back to runExerciseCheck when testCases provided without API key', async () => {
     const service = new StructuredChallengeService({
       generateFn: async ({ prompt, unfiltered }) => {
         assert.equal(unfiltered, true);
@@ -96,7 +132,29 @@ describe('StructuredChallengeService', () => {
 
     assert.equal(feedback.passed, true);
     assert.equal(feedback.score, 95);
-    assert.equal(feedback.strengths.length, 1);
+
+    const offlineService = new StructuredChallengeService({ apiKey: '' });
+    const offlineFeedback = await offlineService.evaluateExerciseSolution({
+      challenge: SAMPLE_CHALLENGE,
+      userCode: `const fs = require('node:fs'); console.log(Number(fs.readFileSync(0, 'utf8').trim()) * 2);`,
+      languageId: 'javascript',
+      testCases: [
+        { input: '4', expectedOutput: '8' },
+        { input: '5', expectedOutput: '10' },
+      ],
+    });
+    assert.equal(offlineFeedback.passed, true);
+    assert.equal(offlineFeedback.score, 100);
+
+    await assert.rejects(
+      () =>
+        offlineService.evaluateExerciseSolution({
+          challenge: SAMPLE_CHALLENGE,
+          userCode: 'const x = 1;',
+          languageId: 'typescript',
+        }),
+      /Gemini API key is required/,
+    );
 
     await assert.rejects(
       () =>

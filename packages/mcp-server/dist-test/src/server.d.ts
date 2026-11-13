@@ -5,7 +5,7 @@ export interface CreateMcpServerOptions {
     captureScreenFallback?: (homeDir?: string) => Promise<LiveScreenSnapshot | null>;
 }
 /**
- * Creates and configures the BotPrograCraft MCP server with all 6 tools.
+ * Creates and configures the BotPrograCraft MCP server with all 7 tools.
  */
 export declare function createBotPrograCraftMcpServer(options?: CreateMcpServerOptions): McpServer;
 /**

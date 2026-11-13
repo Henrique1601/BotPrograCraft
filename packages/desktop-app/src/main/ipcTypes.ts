@@ -10,9 +10,10 @@ import type {
   ExerciseCheckParams,
   ExerciseCheckResult,
   ExerciseFeedback,
-  LogicChallenge,
+  GeneratedLogicChallenge,
   OllamaHealthResult,
 } from '@botprogracraft/ai-core';
+import type { McpInstallResult } from './mcpInstaller';
 import type { CaptureSourceSummary } from './screenCapture';
 
 export interface TranscriptEntry {
@@ -68,6 +69,11 @@ export interface RecurringErrorSummary {
   lastSeenAt: string;
 }
 
+export interface StudyReportExportResult {
+  markdown: string;
+  savedPath: string;
+}
+
 export interface DesktopBridgeApi {
   getInitialState: () => Promise<DesktopStateSnapshot>;
   captureScreenFrame: () => Promise<ScreenFrame | null>;
@@ -89,12 +95,14 @@ export interface DesktopBridgeApi {
   generateLogicChallenge: (
     difficulty: ChallengeDifficulty,
     topic?: string,
-  ) => Promise<LogicChallenge>;
+  ) => Promise<GeneratedLogicChallenge>;
   evaluateSolution: (
-    challenge: LogicChallenge,
+    challenge: GeneratedLogicChallenge,
     userCode: string,
   ) => Promise<ExerciseFeedback>;
   runExerciseCheck: (params: ExerciseCheckParams) => Promise<ExerciseCheckResult>;
+  installAntigravityMcp: () => Promise<McpInstallResult>;
+  exportStudyReport: () => Promise<StudyReportExportResult>;
   onIdeConnection: (cb: (connected: boolean) => void) => () => void;
   onIdeContext: (cb: (context: IdeContextPayload) => void) => () => void;
   onLiveStatus: (cb: (status: LiveSessionStatus, message?: string) => void) => () => void;

@@ -40,6 +40,7 @@ const path = __importStar(require("node:path"));
 const node_test_1 = require("node:test");
 const index_js_1 = require("@modelcontextprotocol/sdk/client/index.js");
 const inMemory_js_1 = require("@modelcontextprotocol/sdk/inMemory.js");
+const reportExporter_1 = require("../src/reportExporter");
 const screenFallback_1 = require("../src/screenFallback");
 const server_1 = require("../src/server");
 const stateReader_1 = require("../src/stateReader");
@@ -88,12 +89,13 @@ function getToolContent(result) {
         assert.equal((0, stateReader_1.readLiveState)(), null);
         assert.equal((0, stateReader_1.readLatestFrame)(), null);
     });
-    (0, node_test_1.it)('exposes all 6 MCP tools', async () => {
+    (0, node_test_1.it)('exposes all 7 MCP tools', async () => {
         const { client, close } = await createConnectedClient();
         try {
             const result = await client.listTools();
             const names = result.tools.map((t) => t.name).sort();
             assert.deepEqual(names, [
+                'export_study_report',
                 'get_learning_progress',
                 'get_live_ide_context',
                 'get_live_screen',
@@ -336,6 +338,55 @@ function getToolContent(result) {
             assert.equal(parsed.recordedAttempt.title, 'Sum Two Numbers');
             assert.equal(parsed.recordedAttempt.passed, true);
             assert.equal(parsed.recordedAttempt.score, 100);
+        }
+        finally {
+            await close();
+        }
+    });
+    (0, node_test_1.it)('export_study_report formats Obsidian Markdown, saves safely, and blocks path traversal', async () => {
+        const repo = (0, stateReader_1.openProgressRepository)();
+        try {
+            repo.recordAttempt({
+                title: 'Binary Search',
+                mode: 'logic-challenge',
+                languageId: 'typescript',
+                prompt: 'Find target index',
+                userCode: 'return -1;',
+                passed: true,
+                score: 95,
+            });
+            repo.recordRecurringError({
+                errorSignature: 'ReferenceError: x is not defined',
+                languageId: 'javascript',
+                filePath: 'src/index.js',
+            });
+        }
+        finally {
+            repo.close();
+        }
+        assert.throws(() => (0, reportExporter_1.saveStudyReportToFile)('# test', { fileName: '../escape.md' }), /path traversal/i);
+        assert.throws(() => (0, reportExporter_1.saveStudyReportToFile)('# test', { fileName: 'sub/nested.md' }), /path traversal/i);
+        const { client, close } = await createConnectedClient();
+        try {
+            const noSaveRes = await client.callTool({
+                name: 'export_study_report',
+                arguments: { saveToFile: false, limit: 5 },
+            });
+            const noSaveJson = JSON.parse(getToolContent(noSaveRes)[0].text);
+            assert.equal(noSaveJson.savedPath, null);
+            assert.match(noSaveJson.markdown, /# BotPrograCraft Study Report/);
+            assert.match(noSaveJson.markdown, /Binary Search/);
+            assert.match(noSaveJson.markdown, /ReferenceError: x is not defined/);
+            const saveRes = await client.callTool({
+                name: 'export_study_report',
+                arguments: { saveToFile: true },
+            });
+            const saveJson = JSON.parse(getToolContent(saveRes)[0].text);
+            assert.ok(saveJson.savedPath);
+            const expectedReportsDir = path.resolve(tempHome, 'reports');
+            assert.ok(saveJson.savedPath.startsWith(expectedReportsDir));
+            assert.ok(fs.existsSync(saveJson.savedPath));
+            assert.equal(fs.readFileSync(saveJson.savedPath, 'utf8'), saveJson.markdown);
         }
         finally {
             await close();

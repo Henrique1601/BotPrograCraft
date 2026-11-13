@@ -5,6 +5,14 @@ All notable changes to **BotPrograCraft** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-13
+
+### Added
+- **Curated Offline Logic Challenge Bank & Ollama Challenge Fallback**: Added `challengeBank.ts` (`getCuratedChallenge`) and automatic `Gemini -> Ollama -> offline bank` fallback in `StructuredChallengeService` (plus `runExerciseCheck` evaluation fallback when test cases are available without an API key).
+- **1-Click Antigravity MCP Installer in HUD**: Added `installAntigravityMcpConfig()` and a **"Conectar MCP"** button in the Electron HUD to safely back up and configure `~/.gemini/antigravity/mcp_config.json`.
+- **Markdown/Obsidian Study Report Export (`export_study_report`)**: Added Obsidian-friendly Markdown report generation and safe file export under `<BOTPROGRACRAFT_HOME>/reports/` via both the MCP server (`export_study_report`) and the HUD **Progresso** tab (**"Exportar Relatório (.md)"**).
+- **Playwright E2E UI Tests**: Added `packages/desktop-app/e2e/hud.spec.ts` and `test:e2e` verifying all 5 tutor modes, compact/expanded pill toggle, and Chat/Desafio/Progresso tabs against the built Vite renderer.
+
 ## [0.3.0] - 2026-11-13
 
 ### Added
