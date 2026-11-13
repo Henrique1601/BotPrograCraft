@@ -27,6 +27,9 @@ jobs:
 
       - name: Build, Typecheck & Test
         run: |
+          $ErrorActionPreference = 'Stop'
+          npm run build:shared
+          npm run build --workspace=@botprogracraft/storage --workspace=@botprogracraft/ai-core
           npm run build
           npm run typecheck
           npm test --workspaces --if-present
