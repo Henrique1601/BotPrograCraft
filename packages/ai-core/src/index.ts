@@ -67,3 +67,23 @@ export {
   type GenerateChallengeParams,
   type StructuredChallengeServiceOptions,
 } from './challengeService';
+
+export {
+  DEFAULT_OLLAMA_BASE_URL,
+  DEFAULT_OLLAMA_MODEL,
+  OllamaClient,
+  type OllamaChatRequest,
+  type OllamaClientOptions,
+  type OllamaFetchFn,
+  type OllamaFetchResponse,
+  type OllamaHealthResult,
+} from './ollamaClient';
+
+export {
+  runExerciseCheck,
+  type ExerciseCheckParams,
+  type ExerciseCheckResult,
+  type ExerciseLanguage,
+  type ExerciseTestCase,
+  type ExerciseTestCaseResult,
+} from './exerciseRunner';

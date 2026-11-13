@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   TUTOR_MODES,
   TUTOR_MODE_INFO,
+  type AiProviderType,
   type IdeContextPayload,
   type LiveSessionStatus,
   type ScreenFrame,
@@ -9,8 +10,11 @@ import {
 } from '@botprogracraft/shared';
 import type {
   ChallengeDifficulty,
+  ExerciseCheckResult,
   ExerciseFeedback,
+  ExerciseLanguage,
   LogicChallenge,
+  OllamaHealthResult,
 } from '@botprogracraft/ai-core';
 import type { TranscriptEntry } from '../main/ipcTypes';
 import type {
@@ -22,6 +26,7 @@ import type {
 } from './global';
 import { useAudioCapture } from './hooks/useAudioCapture';
 import { useAudioPlayback } from './hooks/useAudioPlayback';
+import { useWebSpeech } from './hooks/useWebSpeech';
 
 type HudTab = 'chat' | 'challenge' | 'progress';
 
@@ -171,13 +176,26 @@ export function App(): React.ReactElement {
   const [challengeLoading, setChallengeLoading] = useState(false);
   const [evaluatingLoading, setEvaluatingLoading] = useState(false);
   const [challengeError, setChallengeError] = useState<string | null>(null);
+  const [exerciseResult, setExerciseResult] =
+    useState<ExerciseCheckResult | null>(null);
+  const [exerciseRunning, setExerciseRunning] = useState(false);
+
+  // AI Provider (Gemini Live vs Ollama Local)
+  const [aiProvider, setAiProvider] = useState<AiProviderType>('gemini-live');
+  const [ollamaHealth, setOllamaHealth] = useState<OllamaHealthResult | null>(
+    null,
+  );
 
   const transcriptEndRef = useRef<HTMLDivElement | null>(null);
 
   const audioPlayback = useAudioPlayback();
   const { enqueueAudio, stop: stopPlayback } = audioPlayback;
+  const webSpeech = useWebSpeech();
+  const { speak, stopSpeaking } = webSpeech;
   const isPlayingRef = useRef(false);
   isPlayingRef.current = audioPlayback.isPlaying;
+  const isMutedRef = useRef(false);
+  isMutedRef.current = audioPlayback.isMuted;
 
   const audioCapture = useAudioCapture({
     sampleRate: 16000,
@@ -190,6 +208,19 @@ export function App(): React.ReactElement {
   });
 
   const handleToggleVoice = useCallback(async () => {
+    if (aiProvider === 'ollama') {
+      if (webSpeech.isListening) {
+        webSpeech.stopListening();
+      } else {
+        webSpeech.startListening((spokenText, isFinal) => {
+          if (isFinal) {
+            void window.botprogracraft.sendTextTurn(spokenText);
+          }
+        });
+      }
+      return;
+    }
+
     if (audioCapture.isCapturing) {
       audioCapture.stopCapture();
       await window.botprogracraft.stopLiveSession();
@@ -200,7 +231,7 @@ export function App(): React.ReactElement {
       await window.botprogracraft.startLiveSession();
       await audioCapture.startCapture();
     }
-  }, [audioCapture, stopPlayback]);
+  }, [aiProvider, audioCapture, stopPlayback, webSpeech]);
 
   const loadProgress = useCallback(async () => {
     const getStats = window.botprogracraft?.getProgressStats;
@@ -258,6 +289,15 @@ export function App(): React.ReactElement {
     }
   }, []);
 
+  const refreshOllamaHealth = useCallback(async () => {
+    try {
+      const health = await window.botprogracraft.checkOllamaHealth();
+      setOllamaHealth(health);
+    } catch {
+      setOllamaHealth({ available: false, models: [], error: 'Unreachable' });
+    }
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
@@ -271,9 +311,11 @@ export function App(): React.ReactElement {
       setLatestFrame(snapshot.latestFrame);
       setApiKeyConfigured(snapshot.apiKeyConfigured);
       setSelectedSourceId(snapshot.selectedCaptureSourceId ?? '');
+      setAiProvider(snapshot.aiProvider);
     });
 
     void refreshCaptureSources();
+    void refreshOllamaHealth();
 
     const unsubs = [
       window.botprogracraft.onIdeConnection(setIdeConnected),
@@ -285,11 +327,17 @@ export function App(): React.ReactElement {
       window.botprogracraft.onTranscript((entry) => {
         setTranscript((prev) => [...prev.slice(-99), entry]);
       }),
+      window.botprogracraft.onSpeakText((text) => {
+        if (!isMutedRef.current) {
+          speak(text);
+        }
+      }),
       window.botprogracraft.onAudioOutput((dataBase64, mimeType) => {
         enqueueAudio(dataBase64, mimeType);
       }),
       window.botprogracraft.onInterrupted(() => {
         stopPlayback();
+        stopSpeaking();
       }),
       window.botprogracraft.onScreenFrame(setLatestFrame),
       window.botprogracraft.onScreenFramePreview(setFramePreview),
@@ -304,7 +352,15 @@ export function App(): React.ReactElement {
         unsub();
       }
     };
-  }, [enqueueAudio, handleToggleVoice, refreshCaptureSources, stopPlayback]);
+  }, [
+    enqueueAudio,
+    handleToggleVoice,
+    refreshCaptureSources,
+    refreshOllamaHealth,
+    speak,
+    stopPlayback,
+    stopSpeaking,
+  ]);
 
   useEffect(() => {
     if (activeTab === 'chat') {
@@ -391,6 +447,42 @@ export function App(): React.ReactElement {
     }
   };
 
+  const handleRunExerciseCheck = async () => {
+    if (!solutionCode.trim()) return;
+    setExerciseRunning(true);
+    setChallengeError(null);
+    setExerciseResult(null);
+    try {
+      const langId = ideContext?.languageId?.toLowerCase() ?? '';
+      const language: ExerciseLanguage =
+        langId === 'python'
+          ? 'python'
+          : langId === 'javascript' || langId === 'javascriptreact'
+            ? 'javascript'
+            : 'typescript';
+      const result = await window.botprogracraft.runExerciseCheck({
+        language,
+        code: solutionCode,
+        testCases: [{ input: '', expectedOutput: '' }],
+      });
+      setExerciseResult(result);
+    } catch (err) {
+      setChallengeError(
+        err instanceof Error ? err.message : 'Falha ao executar código.',
+      );
+    } finally {
+      setExerciseRunning(false);
+    }
+  };
+
+  const handleProviderChange = async (nextProvider: AiProviderType) => {
+    setAiProvider(nextProvider);
+    await window.botprogracraft.setAiProvider(nextProvider);
+    if (nextProvider === 'ollama') {
+      void refreshOllamaHealth();
+    }
+  };
+
   const handleSendText = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = inputText.trim();
@@ -405,7 +497,11 @@ export function App(): React.ReactElement {
     : 'No active file';
 
   const diagnosticsCount = ideContext?.diagnostics.length ?? 0;
-  const isVoiceActive = audioCapture.isCapturing || audioPlayback.isPlaying;
+  const isVoiceActive =
+    audioCapture.isCapturing ||
+    audioPlayback.isPlaying ||
+    webSpeech.isListening ||
+    webSpeech.isSpeaking;
   const passRate =
     progressStats && progressStats.totalAttempts > 0
       ? Math.round(
@@ -520,13 +616,38 @@ export function App(): React.ReactElement {
             <span className="badge-dot" />
             {ideConnected ? 'IDE' : 'Offline'}
           </span>
-          <span
-            className={`badge badge--${liveStatus}`}
-            title={statusMessage ?? `Live API: ${liveStatus}`}
+          <select
+            className="hud-select hud-select--compact"
+            aria-label="Provedor de IA"
+            value={aiProvider}
+            onChange={(e) =>
+              void handleProviderChange(e.target.value as AiProviderType)
+            }
           >
-            <span className="badge-dot" />
-            {liveStatus}
-          </span>
+            <option value="gemini-live">Gemini Live</option>
+            <option value="ollama">Ollama Local</option>
+          </select>
+          {aiProvider === 'ollama' ? (
+            <span
+              className={`badge ${ollamaHealth?.available ? 'badge--connected' : 'badge--error'}`}
+              title={
+                ollamaHealth?.available
+                  ? `Ollama online (${ollamaHealth.models.join(', ') || 'ready'})`
+                  : `Ollama offline: ${ollamaHealth?.error ?? 'unreachable'}`
+              }
+            >
+              <span className="badge-dot" />
+              {ollamaHealth?.available ? 'Ollama' : 'Ollama Off'}
+            </span>
+          ) : (
+            <span
+              className={`badge badge--${liveStatus}`}
+              title={statusMessage ?? `Live API: ${liveStatus}`}
+            >
+              <span className="badge-dot" />
+              {liveStatus}
+            </span>
+          )}
           <button
             type="button"
             className="icon-btn"
@@ -714,6 +835,14 @@ export function App(): React.ReactElement {
               <div className="challenge-actions">
                 <button
                   type="button"
+                  className="pill-btn"
+                  disabled={exerciseRunning || !solutionCode.trim()}
+                  onClick={() => void handleRunExerciseCheck()}
+                >
+                  {exerciseRunning ? 'Executando...' : 'Testar Código'}
+                </button>
+                <button
+                  type="button"
                   className="send-btn"
                   disabled={evaluatingLoading || !solutionCode.trim()}
                   onClick={() => void handleEvaluateSolution()}
@@ -721,6 +850,35 @@ export function App(): React.ReactElement {
                   {evaluatingLoading ? 'Avaliando...' : 'Avaliar Solução'}
                 </button>
               </div>
+
+              {exerciseResult && (
+                <div className="feedback-card">
+                  <div className="feedback-header">
+                    <span
+                      className={`attempt-badge ${
+                        exerciseResult.passed
+                          ? 'attempt-badge--pass'
+                          : 'attempt-badge--fail'
+                      }`}
+                    >
+                      {exerciseResult.passed ? 'Execução OK' : 'Falha na Execução'}
+                    </span>
+                    <span className="attempt-score">
+                      {exerciseResult.passedCount}/{exerciseResult.totalCount}
+                    </span>
+                  </div>
+                  {exerciseResult.results[0]?.actualOutput && (
+                    <pre className="challenge-output">
+                      {exerciseResult.results[0].actualOutput}
+                    </pre>
+                  )}
+                  {exerciseResult.results[0]?.error && (
+                    <div className="hud-alert hud-alert--error">
+                      {exerciseResult.results[0].error}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {challengeFeedback && (
                 <div className="feedback-card">
@@ -1014,8 +1172,13 @@ export function App(): React.ReactElement {
 
             <button
               type="button"
-              className={`pill-btn ${audioPlayback.isPlaying ? 'pill-btn--speaking' : ''}`}
-              onClick={audioPlayback.toggleMute}
+              className={`pill-btn ${audioPlayback.isPlaying || webSpeech.isSpeaking ? 'pill-btn--speaking' : ''}`}
+              onClick={() => {
+                if (!audioPlayback.isMuted) {
+                  stopSpeaking();
+                }
+                audioPlayback.toggleMute();
+              }}
               aria-pressed={audioPlayback.isMuted}
               title={
                 audioPlayback.isMuted

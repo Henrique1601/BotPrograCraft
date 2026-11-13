@@ -40,6 +40,7 @@ const path = __importStar(require("node:path"));
 const node_test_1 = require("node:test");
 const index_js_1 = require("@modelcontextprotocol/sdk/client/index.js");
 const inMemory_js_1 = require("@modelcontextprotocol/sdk/inMemory.js");
+const screenFallback_1 = require("../src/screenFallback");
 const server_1 = require("../src/server");
 const stateReader_1 = require("../src/stateReader");
 function getToolContent(result) {
@@ -66,8 +67,11 @@ function getToolContent(result) {
         }
         fs.rmSync(tempHome, { recursive: true, force: true });
     });
-    async function createConnectedClient() {
-        const server = (0, server_1.createBotPrograCraftMcpServer)();
+    async function createConnectedClient(options = {}) {
+        const server = (0, server_1.createBotPrograCraftMcpServer)({
+            captureScreenFallback: async () => null,
+            ...options,
+        });
         const client = new index_js_1.Client({ name: 'test-client', version: '1.0.0' });
         const [clientTransport, serverTransport] = inMemory_js_1.InMemoryTransport.createLinkedPair();
         await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -84,7 +88,7 @@ function getToolContent(result) {
         assert.equal((0, stateReader_1.readLiveState)(), null);
         assert.equal((0, stateReader_1.readLatestFrame)(), null);
     });
-    (0, node_test_1.it)('exposes all 5 MCP tools', async () => {
+    (0, node_test_1.it)('exposes all 6 MCP tools', async () => {
         const { client, close } = await createConnectedClient();
         try {
             const result = await client.listTools();
@@ -95,6 +99,7 @@ function getToolContent(result) {
                 'get_live_screen',
                 'get_tutor_prompt',
                 'record_exercise_attempt',
+                'run_exercise_check',
             ]);
         }
         finally {
@@ -250,6 +255,87 @@ function getToolContent(result) {
             assert.equal(progress.recentAttempts[0].title, 'Exercise 6');
             assert.equal(progress.topRecurringErrors.length, 1);
             assert.equal(progress.topRecurringErrors[0].errorSignature, 'TS2322: Type string is not assignable to type number');
+        }
+        finally {
+            await close();
+        }
+    });
+    (0, node_test_1.it)('get_live_screen falls back to captureWindowsScreenJpeg when missing or captureNow=true', async () => {
+        const fallbackJpeg = Buffer.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43, 0xff, 0xd9]);
+        let captureCalls = 0;
+        const { client, close } = await createConnectedClient({
+            captureScreenFallback: async (homeDir) => {
+                captureCalls += 1;
+                return (0, screenFallback_1.captureWindowsScreenJpeg)({
+                    homeDir,
+                    execCapture: async (jpgPath, metaPath) => {
+                        fs.writeFileSync(jpgPath, fallbackJpeg);
+                        fs.writeFileSync(metaPath, JSON.stringify({ width: 1920, height: 1080, timestamp: 1700000099999 }), 'utf8');
+                    },
+                });
+            },
+        });
+        try {
+            const firstRes = await client.callTool({ name: 'get_live_screen', arguments: {} });
+            const firstBlocks = getToolContent(firstRes);
+            assert.equal(captureCalls, 1);
+            assert.equal(firstBlocks[0].type, 'image');
+            assert.equal(firstBlocks[0].data, fallbackJpeg.toString('base64'));
+            const firstMeta = JSON.parse(firstBlocks[1].text);
+            assert.equal(firstMeta.available, true);
+            assert.equal(firstMeta.width, 1920);
+            assert.equal(firstMeta.height, 1080);
+            assert.equal(firstMeta.capturedOnDemand, true);
+            // Cached frame should be used without calling fallback again when captureNow is omitted
+            const cachedRes = await client.callTool({ name: 'get_live_screen', arguments: {} });
+            const cachedMeta = JSON.parse(getToolContent(cachedRes)[1].text);
+            assert.equal(captureCalls, 1);
+            assert.equal(cachedMeta.capturedOnDemand, false);
+            // captureNow=true forces a fresh fallback capture
+            const forcedRes = await client.callTool({
+                name: 'get_live_screen',
+                arguments: { captureNow: true },
+            });
+            const forcedMeta = JSON.parse(getToolContent(forcedRes)[1].text);
+            assert.equal(captureCalls, 2);
+            assert.equal(forcedMeta.capturedOnDemand, true);
+        }
+        finally {
+            await close();
+        }
+    });
+    (0, node_test_1.it)('run_exercise_check executes test cases and optionally records the attempt', async () => {
+        const { client, close } = await createConnectedClient();
+        try {
+            const res = await client.callTool({
+                name: 'run_exercise_check',
+                arguments: {
+                    language: 'javascript',
+                    code: [
+                        "const fs = require('node:fs');",
+                        'const input = fs.readFileSync(0, "utf8").trim();',
+                        'const [a, b] = input.split(" ").map(Number);',
+                        'console.log(a + b);',
+                    ].join('\n'),
+                    testCases: [
+                        { input: '2 3', expectedOutput: '5' },
+                        { input: '10 20', expectedOutput: '30' },
+                    ],
+                    recordAttempt: true,
+                    title: 'Sum Two Numbers',
+                    mode: 'logic-challenge',
+                    prompt: 'Read two integers and print their sum.',
+                },
+            });
+            assert.notEqual(res.isError, true);
+            const parsed = JSON.parse(getToolContent(res)[0].text);
+            assert.equal(parsed.passed, true);
+            assert.equal(parsed.passedCount, 2);
+            assert.equal(parsed.totalCount, 2);
+            assert.ok(parsed.recordedAttempt);
+            assert.equal(parsed.recordedAttempt.title, 'Sum Two Numbers');
+            assert.equal(parsed.recordedAttempt.passed, true);
+            assert.equal(parsed.recordedAttempt.score, 100);
         }
         finally {
             await close();

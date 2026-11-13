@@ -1041,6 +1041,20 @@ input:focus-visible {
 .challenge-actions {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
+}
+
+.challenge-output {
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(10, 12, 18, 0.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 .feedback-card {

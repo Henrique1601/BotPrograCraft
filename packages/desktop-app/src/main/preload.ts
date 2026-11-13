@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  AiProviderType,
   IdeContextPayload,
   LiveSessionStatus,
   ScreenFrame,
@@ -7,6 +8,7 @@ import type {
 } from '@botprogracraft/shared';
 import type {
   ChallengeDifficulty,
+  ExerciseCheckParams,
   LogicChallenge,
 } from '@botprogracraft/ai-core';
 import type {
@@ -38,6 +40,9 @@ const api: DesktopBridgeApi = {
     ipcRenderer.invoke('desktop:set-screen-share', enabled),
   setTutorMode: (mode: TutorMode) =>
     ipcRenderer.invoke('desktop:set-tutor-mode', mode),
+  setAiProvider: (provider: AiProviderType, ollamaModel?: string) =>
+    ipcRenderer.invoke('desktop:set-ai-provider', provider, ollamaModel),
+  checkOllamaHealth: () => ipcRenderer.invoke('desktop:check-ollama-health'),
   startLiveSession: () => ipcRenderer.invoke('desktop:start-live'),
   stopLiveSession: () => ipcRenderer.invoke('desktop:stop-live'),
   sendTextTurn: (text: string) => ipcRenderer.invoke('desktop:send-text', text),
@@ -55,6 +60,8 @@ const api: DesktopBridgeApi = {
     ipcRenderer.invoke('desktop:generate-logic-challenge', difficulty, topic),
   evaluateSolution: (challenge: LogicChallenge, userCode: string) =>
     ipcRenderer.invoke('desktop:evaluate-solution', challenge, userCode),
+  runExerciseCheck: (params: ExerciseCheckParams) =>
+    ipcRenderer.invoke('desktop:run-exercise-check', params),
   onIdeConnection: (cb) =>
     subscribe<[connected: boolean]>('event:ide-connection', cb),
   onIdeContext: (cb) =>
@@ -66,6 +73,7 @@ const api: DesktopBridgeApi = {
     ),
   onTranscript: (cb) =>
     subscribe<[entry: TranscriptEntry]>('event:transcript', cb),
+  onSpeakText: (cb) => subscribe<[text: string]>('event:speak-text', cb),
   onAudioOutput: (cb) =>
     subscribe<[dataBase64: string, mimeType: string, sampleRate: number]>(
       'event:audio-output',

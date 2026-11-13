@@ -25,11 +25,19 @@ export type LiveSessionStatus =
   | 'error';
 
 /**
+ * Supported AI backend providers for BotPrograCraft live tutoring.
+ */
+export type AiProviderType = 'gemini-live' | 'ollama';
+
+/**
  * Configuration for initializing or updating a Gemini Live API session.
  */
 export interface LiveSessionConfig {
   apiKey: string;
   model?: string;
+  provider?: AiProviderType;
+  ollamaUrl?: string;
+  ollamaModel?: string;
   tutorMode: TutorMode;
   voiceName?: string;
   language?: string;

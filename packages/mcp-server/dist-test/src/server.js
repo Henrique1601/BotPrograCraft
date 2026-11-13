@@ -6,6 +6,7 @@ const ai_core_1 = require("@botprogracraft/ai-core");
 const mcp_js_1 = require("@modelcontextprotocol/sdk/server/mcp.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const zod_1 = require("zod");
+const screenFallback_1 = require("./screenFallback");
 const stateReader_1 = require("./stateReader");
 const TUTOR_MODE_ENUM = zod_1.z.enum([
     'socratic',
@@ -37,14 +38,48 @@ const RecordExerciseAttemptInputSchema = zod_1.z.object({
         .optional()
         .describe('Optional structured evaluation feedback object'),
 });
+const GetLiveScreenInputSchema = zod_1.z.object({
+    captureNow: zod_1.z
+        .boolean()
+        .optional()
+        .describe('Force an on-demand Windows screen capture instead of reading a cached frame'),
+});
+const RunExerciseCheckInputSchema = zod_1.z.object({
+    language: zod_1.z
+        .enum(['javascript', 'typescript', 'python'])
+        .describe('Programming language to execute'),
+    code: zod_1.z.string().describe('User code to test'),
+    testCases: zod_1.z
+        .array(zod_1.z.object({
+        input: zod_1.z.string().describe('Stdin input passed to the program'),
+        expectedOutput: zod_1.z.string().describe('Expected stdout output'),
+    }))
+        .min(1)
+        .describe('Test cases to run against the code'),
+    timeoutMs: zod_1.z
+        .number()
+        .int()
+        .positive()
+        .max(30_000)
+        .optional()
+        .describe('Per-test-case execution timeout in milliseconds (default 3000)'),
+    recordAttempt: zod_1.z
+        .boolean()
+        .optional()
+        .describe('When true and title + mode are provided, persists the attempt to SQLite'),
+    title: zod_1.z.string().min(1).optional().describe('Exercise title (required when recordAttempt is true)'),
+    mode: zod_1.z.string().min(1).optional().describe('Tutoring mode (required when recordAttempt is true)'),
+    prompt: zod_1.z.string().optional().describe('Optional exercise prompt stored with the attempt'),
+});
 /**
- * Creates and configures the BotPrograCraft MCP server with all 5 tools.
+ * Creates and configures the BotPrograCraft MCP server with all 6 tools.
  */
 function createBotPrograCraftMcpServer(options = {}) {
     const server = new mcp_js_1.McpServer({
         name: 'botprogracraft',
         version: '0.3.0',
     });
+    const captureScreenFallback = options.captureScreenFallback ?? ((homeDir) => (0, screenFallback_1.captureWindowsScreenJpeg)({ homeDir }));
     server.registerTool('get_live_ide_context', {
         title: 'Get Live IDE Context',
         description: 'Reads the latest active editor state (file, language, selection, visible code, diagnostics) and active tutor mode from BotPrograCraft.',
@@ -79,10 +114,17 @@ function createBotPrograCraftMcpServer(options = {}) {
     });
     server.registerTool('get_live_screen', {
         title: 'Get Live Screen',
-        description: 'Returns the latest screen frame captured by BotPrograCraft as a JPEG image alongside capture metadata.',
-    }, async () => {
+        description: 'Returns the latest screen frame captured by BotPrograCraft as a JPEG image alongside capture metadata. Falls back to on-demand Windows screen capture when no frame exists or captureNow is true.',
+        inputSchema: GetLiveScreenInputSchema,
+    }, async (args) => {
+        const parsed = GetLiveScreenInputSchema.parse(args ?? {});
         const home = (0, stateReader_1.getBotPrograCraftHome)(options.homeDir);
-        const frame = (0, stateReader_1.readLatestFrame)(home);
+        let frame = parsed.captureNow ? null : (0, stateReader_1.readLatestFrame)(home);
+        let capturedOnDemand = false;
+        if (!frame) {
+            frame = await captureScreenFallback(home);
+            capturedOnDemand = frame !== null;
+        }
         if (!frame) {
             return {
                 content: [
@@ -91,7 +133,7 @@ function createBotPrograCraftMcpServer(options = {}) {
                         text: JSON.stringify({
                             available: false,
                             home,
-                            message: 'No captured screen frame found yet.',
+                            message: 'No captured screen frame found and on-demand capture was unavailable.',
                         }, null, 2),
                     },
                 ],
@@ -111,6 +153,7 @@ function createBotPrograCraftMcpServer(options = {}) {
                         width: frame.width,
                         height: frame.height,
                         timestamp: frame.timestamp,
+                        capturedOnDemand,
                     }, null, 2),
                 },
             ],
@@ -194,6 +237,51 @@ function createBotPrograCraftMcpServer(options = {}) {
         finally {
             repo.close();
         }
+    });
+    server.registerTool('run_exercise_check', {
+        title: 'Run Exercise Check',
+        description: 'Executes JavaScript, TypeScript, or Python code against stdin/stdout test cases in an isolated child process and optionally records the attempt to SQLite.',
+        inputSchema: RunExerciseCheckInputSchema,
+    }, async (args) => {
+        const parsed = RunExerciseCheckInputSchema.parse(args);
+        const result = await (0, ai_core_1.runExerciseCheck)({
+            language: parsed.language,
+            code: parsed.code,
+            testCases: parsed.testCases,
+            timeoutMs: parsed.timeoutMs,
+        });
+        let recordedAttempt = undefined;
+        if (parsed.recordAttempt && parsed.title && parsed.mode) {
+            const score = result.totalCount > 0 ? Math.round((result.passedCount / result.totalCount) * 100) : 0;
+            const repo = (0, stateReader_1.openProgressRepository)(options.homeDir);
+            try {
+                recordedAttempt = repo.recordAttempt({
+                    title: parsed.title,
+                    mode: parsed.mode,
+                    languageId: parsed.language,
+                    prompt: parsed.prompt ?? parsed.title,
+                    userCode: parsed.code,
+                    passed: result.passed,
+                    score,
+                    feedback: {
+                        passedCount: result.passedCount,
+                        totalCount: result.totalCount,
+                        results: result.results,
+                    },
+                });
+            }
+            finally {
+                repo.close();
+            }
+        }
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(recordedAttempt !== undefined ? { ...result, recordedAttempt } : result, null, 2),
+                },
+            ],
+        };
     });
     return server;
 }

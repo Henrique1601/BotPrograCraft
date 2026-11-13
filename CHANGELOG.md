@@ -5,6 +5,13 @@ All notable changes to **BotPrograCraft** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-13
+
+### Added
+- **MCP On-Demand Screen Capture Fallback**: `get_live_screen` in `@botprogracraft/mcp-server` now accepts `captureNow` and falls back to `captureWindowsScreenJpeg()` when `latest-frame.jpg` is missing or requested on demand.
+- **Ollama Local Provider & Web Speech API Voice**: Added `AiProviderType` (`'gemini-live' | 'ollama'`), `OllamaClient` (`http://127.0.0.1:11434`), and `useWebSpeech` (Web Speech API TTS & speech recognition) in the Electron HUD so users can run fully local tutoring without a Gemini API key.
+- **Local Exercise Code Runner (`run_exercise_check`)**: Added `runExerciseCheck` in `@botprogracraft/ai-core` and exposed it via both the MCP server (`run_exercise_check`) and the HUD **Desafio** tab ("Testar Código") to execute JavaScript, TypeScript, and Python test cases in isolated child processes with strict timeouts.
+
 ## [0.2.0] - 2026-11-13
 
 ### Added

@@ -40,7 +40,8 @@ Add the following entry to your Antigravity IDE MCP configuration (`mcp_config.j
 | Tool | Description |
 | --- | --- |
 | `get_live_ide_context` | Returns the latest `IdeContextPayload`, active `tutorMode`, and `updatedAt` from `live-state.json`. |
-| `get_live_screen` | Returns the latest captured screen frame (`latest-frame.jpg`) as an MCP `image` content block (`image/jpeg`) plus dimensions and timestamp metadata. |
+| `get_live_screen` | Returns the latest captured screen frame (`latest-frame.jpg`) as an MCP `image` content block (`image/jpeg`) plus dimensions and timestamp metadata. Supports `captureNow: true` and automatically falls back to on-demand Windows screen capture when no cached frame exists. |
 | `get_tutor_prompt` | Generates a BotPrograCraft system prompt for a given `TutorMode` (`socratic`, `pair-programming`, `explain-bug`, `logic-challenge`, `direct`) via `@botprogracraft/ai-core`. |
 | `record_exercise_attempt` | Validates an exercise evaluation with Zod and persists it to `botprogracraft.db` via `ProgressRepository.recordAttempt`. |
 | `get_learning_progress` | Returns aggregate stats (`getStats()`), the 5 most recent exercise attempts (`listRecentAttempts(5)`), and the top 5 recurring errors (`getTopRecurringErrors(5)`). |
+| `run_exercise_check` | Executes JavaScript, TypeScript, or Python code against stdin/stdout test cases via `@botprogracraft/ai-core` and optionally records the attempt to `botprogracraft.db`. |

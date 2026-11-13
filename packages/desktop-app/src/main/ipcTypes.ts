@@ -1,4 +1,5 @@
 import type {
+  AiProviderType,
   IdeContextPayload,
   LiveSessionStatus,
   ScreenFrame,
@@ -6,8 +7,11 @@ import type {
 } from '@botprogracraft/shared';
 import type {
   ChallengeDifficulty,
+  ExerciseCheckParams,
+  ExerciseCheckResult,
   ExerciseFeedback,
   LogicChallenge,
+  OllamaHealthResult,
 } from '@botprogracraft/ai-core';
 import type { CaptureSourceSummary } from './screenCapture';
 
@@ -35,6 +39,8 @@ export interface DesktopStateSnapshot {
   latestFrame: ScreenFrame | null;
   apiKeyConfigured: boolean;
   selectedCaptureSourceId: string | null;
+  aiProvider: AiProviderType;
+  ollamaModel: string;
 }
 
 export interface ProgressStatsSummary {
@@ -69,6 +75,8 @@ export interface DesktopBridgeApi {
   setCaptureSource: (sourceId: string | null) => Promise<void>;
   setScreenShareEnabled: (enabled: boolean) => Promise<void>;
   setTutorMode: (mode: TutorMode) => Promise<void>;
+  setAiProvider: (provider: AiProviderType, ollamaModel?: string) => Promise<void>;
+  checkOllamaHealth: () => Promise<OllamaHealthResult>;
   startLiveSession: () => Promise<void>;
   stopLiveSession: () => Promise<void>;
   sendTextTurn: (text: string) => Promise<void>;
@@ -86,10 +94,12 @@ export interface DesktopBridgeApi {
     challenge: LogicChallenge,
     userCode: string,
   ) => Promise<ExerciseFeedback>;
+  runExerciseCheck: (params: ExerciseCheckParams) => Promise<ExerciseCheckResult>;
   onIdeConnection: (cb: (connected: boolean) => void) => () => void;
   onIdeContext: (cb: (context: IdeContextPayload) => void) => () => void;
   onLiveStatus: (cb: (status: LiveSessionStatus, message?: string) => void) => () => void;
   onTranscript: (cb: (entry: TranscriptEntry) => void) => () => void;
+  onSpeakText: (cb: (text: string) => void) => () => void;
   onAudioOutput: (cb: (dataBase64: string, mimeType: string, sampleRate: number) => void) => () => void;
   onInterrupted: (cb: () => void) => () => void;
   onTurnComplete: (cb: () => void) => () => void;

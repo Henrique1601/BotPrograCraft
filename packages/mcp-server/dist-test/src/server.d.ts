@@ -1,9 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { type LiveScreenSnapshot } from './stateReader';
 export interface CreateMcpServerOptions {
     homeDir?: string;
+    captureScreenFallback?: (homeDir?: string) => Promise<LiveScreenSnapshot | null>;
 }
 /**
- * Creates and configures the BotPrograCraft MCP server with all 5 tools.
+ * Creates and configures the BotPrograCraft MCP server with all 6 tools.
  */
 export declare function createBotPrograCraftMcpServer(options?: CreateMcpServerOptions): McpServer;
 /**

@@ -14,21 +14,29 @@ import * as path from 'node:path';
 import {
   DEFAULT_WS_PORT,
   isTutorMode,
+  type AiProviderType,
   type IdeContextPayload,
   type LiveSessionStatus,
   type ScreenFrame,
   type TutorMode,
 } from '@botprogracraft/shared';
 import {
+  buildSystemPrompt,
   ChallengeDifficultySchema,
   ContextAggregator,
+  DEFAULT_OLLAMA_MODEL,
   GeminiLiveSessionManager,
   LogicChallengeSchema,
+  OllamaClient,
+  runExerciseCheck,
   ScreenFrameGate,
   StructuredChallengeService,
   type ChallengeDifficulty,
+  type ExerciseCheckParams,
+  type ExerciseCheckResult,
   type ExerciseFeedback,
   type LogicChallenge,
+  type OllamaHealthResult,
 } from '@botprogracraft/ai-core';
 import { ProgressRepository } from '@botprogracraft/storage';
 import { loadWorkspaceEnv } from './envLoader';
@@ -64,10 +72,17 @@ let screenInterval: ReturnType<typeof setInterval> | null = null;
 let screenShareEnabled = false;
 let currentTutorMode: TutorMode = 'socratic';
 let currentLiveStatus: LiveSessionStatus = 'disconnected';
+let currentAiProvider: AiProviderType = 'gemini-live';
+let currentOllamaModel =
+  process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL;
 let progressRepo: ProgressRepository | null = null;
 
 const contextAggregator = new ContextAggregator();
 const wsServer = new IdeWsServer(DEFAULT_WS_PORT);
+const ollamaClient = new OllamaClient({
+  baseUrl: process.env.OLLAMA_BASE_URL?.trim() || undefined,
+  defaultModel: currentOllamaModel,
+});
 const challengeService = new StructuredChallengeService({
   apiKey: process.env.GEMINI_API_KEY ?? '',
 });
@@ -331,6 +346,8 @@ function registerIpcHandlers(): void {
       latestFrame: contextAggregator.getLatestScreenFrame(),
       apiKeyConfigured: Boolean(process.env.GEMINI_API_KEY?.trim()),
       selectedCaptureSourceId: getCaptureSource(),
+      aiProvider: currentAiProvider,
+      ollamaModel: currentOllamaModel,
     }),
   );
 
@@ -385,6 +402,32 @@ function registerIpcHandlers(): void {
     });
   });
 
+  ipcMain.handle(
+    'desktop:set-ai-provider',
+    (_event, provider: unknown, ollamaModel?: unknown) => {
+      if (provider !== 'gemini-live' && provider !== 'ollama') {
+        throw new Error('Invalid AI provider parameter.');
+      }
+      if (ollamaModel !== undefined && typeof ollamaModel !== 'string') {
+        throw new Error('Invalid ollamaModel parameter.');
+      }
+      currentAiProvider = provider;
+      if (ollamaModel && ollamaModel.trim()) {
+        currentOllamaModel = ollamaModel.trim();
+      }
+      if (provider === 'ollama' && liveManager.getStatus() !== 'disconnected') {
+        liveManager.disconnect();
+      }
+    },
+  );
+
+  ipcMain.handle(
+    'desktop:check-ollama-health',
+    async (): Promise<OllamaHealthResult> => {
+      return ollamaClient.checkHealth();
+    },
+  );
+
   ipcMain.handle('desktop:start-live', async () => {
     if (!process.env.GEMINI_API_KEY?.trim()) {
       sendToRenderer(
@@ -424,6 +467,43 @@ function registerIpcHandlers(): void {
       isFinal: true,
       timestamp: Date.now(),
     });
+
+    if (currentAiProvider === 'ollama') {
+      try {
+        const systemPrompt = buildSystemPrompt({
+          mode: currentTutorMode,
+          unfiltered: currentTutorMode === 'direct',
+        });
+        const contextText = contextAggregator.formatContext();
+        const prompt = `${contextText}\n\n### Student Message\n${trimmed}`;
+        const latestFrame = screenShareEnabled
+          ? contextAggregator.getLatestScreenFrame()
+          : null;
+
+        const reply = await ollamaClient.chat({
+          model: currentOllamaModel,
+          systemPrompt,
+          prompt,
+          imageBase64: latestFrame?.dataBase64,
+        });
+
+        emitTranscript({
+          role: 'assistant',
+          text: reply,
+          isFinal: true,
+          timestamp: Date.now(),
+        });
+        sendToRenderer('event:speak-text', reply);
+      } catch (err) {
+        emitTranscript({
+          role: 'system',
+          text: `Ollama error: ${redactSensitiveText(err instanceof Error ? err.message : String(err))}`,
+          isFinal: true,
+          timestamp: Date.now(),
+        });
+      }
+      return;
+    }
 
     if (liveManager.getStatus() !== 'connected') {
       if (!process.env.GEMINI_API_KEY?.trim()) {
@@ -628,6 +708,35 @@ function registerIpcHandlers(): void {
       }
 
       return feedback;
+    },
+  );
+
+  ipcMain.handle(
+    'desktop:run-exercise-check',
+    async (_event, params: unknown): Promise<ExerciseCheckResult> => {
+      if (typeof params !== 'object' || params === null) {
+        throw new Error('Invalid runExerciseCheck params.');
+      }
+      const candidate = params as Partial<ExerciseCheckParams>;
+      if (
+        candidate.language !== 'javascript' &&
+        candidate.language !== 'typescript' &&
+        candidate.language !== 'python'
+      ) {
+        throw new Error('Unsupported exercise language.');
+      }
+      if (typeof candidate.code !== 'string' || !candidate.code.trim()) {
+        throw new Error('Exercise code must not be empty.');
+      }
+      if (!Array.isArray(candidate.testCases)) {
+        throw new Error('Exercise testCases must be an array.');
+      }
+      return runExerciseCheck({
+        language: candidate.language,
+        code: candidate.code,
+        testCases: candidate.testCases,
+        timeoutMs: candidate.timeoutMs,
+      });
     },
   );
 }

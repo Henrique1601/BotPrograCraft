@@ -1,16 +1,19 @@
-import { buildSystemPrompt } from '@botprogracraft/ai-core';
+import { buildSystemPrompt, runExerciseCheck } from '@botprogracraft/ai-core';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { captureWindowsScreenJpeg } from './screenFallback';
 import {
   getBotPrograCraftHome,
   openProgressRepository,
   readLatestFrame,
   readLiveState,
+  type LiveScreenSnapshot,
 } from './stateReader';
 
 export interface CreateMcpServerOptions {
   homeDir?: string;
+  captureScreenFallback?: (homeDir?: string) => Promise<LiveScreenSnapshot | null>;
 }
 
 const TUTOR_MODE_ENUM = z.enum([
@@ -46,14 +49,53 @@ const RecordExerciseAttemptInputSchema = z.object({
     .describe('Optional structured evaluation feedback object'),
 });
 
+const GetLiveScreenInputSchema = z.object({
+  captureNow: z
+    .boolean()
+    .optional()
+    .describe('Force an on-demand Windows screen capture instead of reading a cached frame'),
+});
+
+const RunExerciseCheckInputSchema = z.object({
+  language: z
+    .enum(['javascript', 'typescript', 'python'])
+    .describe('Programming language to execute'),
+  code: z.string().describe('User code to test'),
+  testCases: z
+    .array(
+      z.object({
+        input: z.string().describe('Stdin input passed to the program'),
+        expectedOutput: z.string().describe('Expected stdout output'),
+      }),
+    )
+    .min(1)
+    .describe('Test cases to run against the code'),
+  timeoutMs: z
+    .number()
+    .int()
+    .positive()
+    .max(30_000)
+    .optional()
+    .describe('Per-test-case execution timeout in milliseconds (default 3000)'),
+  recordAttempt: z
+    .boolean()
+    .optional()
+    .describe('When true and title + mode are provided, persists the attempt to SQLite'),
+  title: z.string().min(1).optional().describe('Exercise title (required when recordAttempt is true)'),
+  mode: z.string().min(1).optional().describe('Tutoring mode (required when recordAttempt is true)'),
+  prompt: z.string().optional().describe('Optional exercise prompt stored with the attempt'),
+});
+
 /**
- * Creates and configures the BotPrograCraft MCP server with all 5 tools.
+ * Creates and configures the BotPrograCraft MCP server with all 6 tools.
  */
 export function createBotPrograCraftMcpServer(options: CreateMcpServerOptions = {}): McpServer {
   const server = new McpServer({
     name: 'botprogracraft',
     version: '0.3.0',
   });
+  const captureScreenFallback =
+    options.captureScreenFallback ?? ((homeDir?: string) => captureWindowsScreenJpeg({ homeDir }));
 
   server.registerTool(
     'get_live_ide_context',
@@ -108,11 +150,20 @@ export function createBotPrograCraftMcpServer(options: CreateMcpServerOptions = 
     {
       title: 'Get Live Screen',
       description:
-        'Returns the latest screen frame captured by BotPrograCraft as a JPEG image alongside capture metadata.',
+        'Returns the latest screen frame captured by BotPrograCraft as a JPEG image alongside capture metadata. Falls back to on-demand Windows screen capture when no frame exists or captureNow is true.',
+      inputSchema: GetLiveScreenInputSchema,
     },
-    async () => {
+    async (args) => {
+      const parsed = GetLiveScreenInputSchema.parse(args ?? {});
       const home = getBotPrograCraftHome(options.homeDir);
-      const frame = readLatestFrame(home);
+
+      let frame = parsed.captureNow ? null : readLatestFrame(home);
+      let capturedOnDemand = false;
+
+      if (!frame) {
+        frame = await captureScreenFallback(home);
+        capturedOnDemand = frame !== null;
+      }
 
       if (!frame) {
         return {
@@ -123,7 +174,7 @@ export function createBotPrograCraftMcpServer(options: CreateMcpServerOptions = 
                 {
                   available: false,
                   home,
-                  message: 'No captured screen frame found yet.',
+                  message: 'No captured screen frame found and on-demand capture was unavailable.',
                 },
                 null,
                 2,
@@ -148,6 +199,7 @@ export function createBotPrograCraftMcpServer(options: CreateMcpServerOptions = 
                 width: frame.width,
                 height: frame.height,
                 timestamp: frame.timestamp,
+                capturedOnDemand,
               },
               null,
               2,
@@ -257,6 +309,63 @@ export function createBotPrograCraftMcpServer(options: CreateMcpServerOptions = 
       } finally {
         repo.close();
       }
+    },
+  );
+
+  server.registerTool(
+    'run_exercise_check',
+    {
+      title: 'Run Exercise Check',
+      description:
+        'Executes JavaScript, TypeScript, or Python code against stdin/stdout test cases in an isolated child process and optionally records the attempt to SQLite.',
+      inputSchema: RunExerciseCheckInputSchema,
+    },
+    async (args) => {
+      const parsed = RunExerciseCheckInputSchema.parse(args);
+      const result = await runExerciseCheck({
+        language: parsed.language,
+        code: parsed.code,
+        testCases: parsed.testCases,
+        timeoutMs: parsed.timeoutMs,
+      });
+
+      let recordedAttempt: unknown = undefined;
+      if (parsed.recordAttempt && parsed.title && parsed.mode) {
+        const score =
+          result.totalCount > 0 ? Math.round((result.passedCount / result.totalCount) * 100) : 0;
+        const repo = openProgressRepository(options.homeDir);
+        try {
+          recordedAttempt = repo.recordAttempt({
+            title: parsed.title,
+            mode: parsed.mode,
+            languageId: parsed.language,
+            prompt: parsed.prompt ?? parsed.title,
+            userCode: parsed.code,
+            passed: result.passed,
+            score,
+            feedback: {
+              passedCount: result.passedCount,
+              totalCount: result.totalCount,
+              results: result.results,
+            },
+          });
+        } finally {
+          repo.close();
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              recordedAttempt !== undefined ? { ...result, recordedAttempt } : result,
+              null,
+              2,
+            ),
+          },
+        ],
+      };
     },
   );
 
