@@ -9,6 +9,7 @@ import {
   Tray,
 } from 'electron';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   DEFAULT_WS_PORT,
@@ -83,6 +84,58 @@ function resolveAssetPath(filename: string): string | undefined {
     path.resolve(process.resourcesPath ?? '', 'assets', filename),
   ];
   return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function getBotPrograCraftHome(): string {
+  const custom = process.env.BOTPROGRACRAFT_HOME?.trim();
+  const dir = custom || path.join(os.homedir(), '.botprogracraft');
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function atomicWriteFileSync(targetPath: string, data: string | Buffer): void {
+  const dir = path.dirname(targetPath);
+  fs.mkdirSync(dir, { recursive: true });
+  const tmpPath = `${targetPath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmpPath, data);
+  fs.renameSync(tmpPath, targetPath);
+}
+
+function persistLiveState(): void {
+  try {
+    const statePath = path.join(getBotPrograCraftHome(), 'live-state.json');
+    const payload = {
+      ideContext: contextAggregator.getIdeContext(),
+      tutorMode: currentTutorMode,
+      updatedAt: Date.now(),
+    };
+    atomicWriteFileSync(statePath, JSON.stringify(payload, null, 2));
+  } catch {
+    // Do not interrupt tutoring if shared state write fails.
+  }
+}
+
+function persistLatestFrame(frame: ScreenFrame): void {
+  try {
+    const home = getBotPrograCraftHome();
+    const jpgPath = path.join(home, 'latest-frame.jpg');
+    const metaPath = path.join(home, 'latest-frame.meta.json');
+    atomicWriteFileSync(jpgPath, Buffer.from(frame.dataBase64, 'base64'));
+    atomicWriteFileSync(
+      metaPath,
+      JSON.stringify(
+        {
+          width: frame.width,
+          height: frame.height,
+          timestamp: frame.timestamp,
+        },
+        null,
+        2,
+      ),
+    );
+  } catch {
+    // Do not interrupt screen capture if shared state write fails.
+  }
 }
 
 function redactSensitiveText(message: string): string {
@@ -223,6 +276,8 @@ async function captureAndBroadcastFrame(): Promise<ScreenFrame | null> {
   const frame = await capturePrimaryScreenFrame();
   if (!frame) return null;
 
+  persistLatestFrame(frame);
+
   const decision = screenFrameGate.shouldSend(frame);
   const preview: ScreenFramePreview = {
     dataUrl: `data:${frame.mimeType};base64,${frame.dataBase64}`,
@@ -321,6 +376,7 @@ function registerIpcHandlers(): void {
     }
     currentTutorMode = mode;
     liveManager.updateTutorMode(mode, mode === 'direct');
+    persistLiveState();
     wsServer.broadcast({
       type: 'ai:status',
       status: currentLiveStatus,
@@ -584,6 +640,7 @@ function setupWsBridge(): void {
   wsServer.on('context', (payload: IdeContextPayload) => {
     liveManager.updateIdeContext(payload);
     sendToRenderer('event:ide-context', payload);
+    persistLiveState();
 
     if (progressRepo && payload.diagnostics.length > 0) {
       const errorDiags = payload.diagnostics.filter((d) => d.severity === 'error');
@@ -632,7 +689,7 @@ void app.whenReady().then(() => {
 
   try {
     progressRepo = new ProgressRepository({
-      dbPath: path.join(app.getPath('userData'), 'botprogracraft.db'),
+      dbPath: path.join(getBotPrograCraftHome(), 'botprogracraft.db'),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -1,0 +1,33 @@
+{
+  "name": "@botprogracraft/mcp-server",
+  "version": "0.3.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Stdio MCP server exposing BotPrograCraft live IDE context, screen frames, tutor prompts, and learning progress to Antigravity IDE.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "botprogracraft-mcp": "dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js"
+  },
+  "dependencies": {
+    "@botprogracraft/ai-core": "*",
+    "@botprogracraft/shared": "*",
+    "@botprogracraft/storage": "*",
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "zod": "^4.6.7"
+  }
+}
