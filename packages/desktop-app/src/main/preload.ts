@@ -51,6 +51,8 @@ const api: DesktopBridgeApi = {
   },
   requestIdeContext: () => ipcRenderer.invoke('desktop:request-ide-context'),
   toggleMinimize: () => ipcRenderer.invoke('desktop:toggle-minimize'),
+  setIgnoreMouseEvents: (ignore: boolean) =>
+    ipcRenderer.invoke('desktop:set-ignore-mouse', ignore),
   getProgressStats: () => ipcRenderer.invoke('desktop:get-progress-stats'),
   listRecentAttempts: (limit?: number) =>
     ipcRenderer.invoke('desktop:list-recent-attempts', limit),

@@ -89,6 +89,7 @@ export interface DesktopBridgeApi {
   sendAudioChunk: (base64Pcm16: string, sampleRate: number) => void;
   requestIdeContext: () => Promise<void>;
   toggleMinimize: () => Promise<void>;
+  setIgnoreMouseEvents: (ignore: boolean) => Promise<void>;
   getProgressStats: () => Promise<ProgressStatsSummary>;
   listRecentAttempts: (limit?: number) => Promise<RecentAttemptSummary[]>;
   listRecurringErrors: (limit?: number) => Promise<RecurringErrorSummary[]>;

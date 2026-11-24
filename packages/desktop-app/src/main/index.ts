@@ -570,6 +570,13 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.handle('desktop:set-ignore-mouse', (_event, ignore: unknown) => {
+    if (typeof ignore !== 'boolean') {
+      throw new Error('Invalid ignore flag');
+    }
+    mainWindow?.setIgnoreMouseEvents(ignore, { forward: true });
+  });
+
   ipcMain.handle(
     'desktop:get-progress-stats',
     (): ProgressStatsSummary => {

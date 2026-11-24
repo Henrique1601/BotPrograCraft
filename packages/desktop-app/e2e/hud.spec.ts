@@ -108,13 +108,19 @@ test('renders all 5 tutor modes including Direto (Sem Filtro) and switches mode'
   await expect(directBtn).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('toggles between expanded HUD and compact pill mode', async ({ page }) => {
+test('toggles between expanded HUD and interactive mascot mode', async ({ page }) => {
   await page.goto('/');
 
-  await page.getByRole('button', { name: 'Switch to compact pill' }).click();
-  await expect(page.getByRole('region', { name: 'BotPrograCraft Compact HUD' })).toBeVisible();
+  const mascotGroup = page.getByRole('group', { name: 'Selecionar estilo visual do mascote' });
+  await expect(mascotGroup.getByRole('button', { name: 'Robozinho' })).toBeVisible();
+  await expect(mascotGroup.getByRole('button', { name: 'Pixel Art' })).toBeVisible();
+  await expect(mascotGroup.getByRole('button', { name: 'Orbe IA' })).toBeVisible();
+  await mascotGroup.getByRole('button', { name: 'Orbe IA' }).click();
 
-  await page.getByRole('button', { name: 'Expand HUD' }).click();
+  await page.getByRole('button', { name: 'Switch to compact pill' }).click();
+  await expect(page.getByRole('region', { name: 'BotPrograCraft Mascote Interativo' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Expandir HUD' }).click();
   await expect(page.getByLabel('Tutor Mode')).toBeVisible();
 });
 

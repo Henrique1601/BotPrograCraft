@@ -1105,3 +1105,424 @@ input:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+
+/* =========================================================
+   MASCOT STYLE SELECTOR (EXPANDED HUD)
+   ========================================================= */
+.hud-mascot-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: rgba(10, 13, 20, 0.52);
+}
+
+.hud-mascot-bar-label {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.hud-mascot-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(15, 20, 31, 0.9);
+  border: 1px solid var(--border-subtle);
+}
+
+.mascot-style-btn {
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    transform 0.14s var(--ease-spring),
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.mascot-style-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.mascot-style-btn:active {
+  transform: scale(0.95);
+}
+
+.mascot-style-btn--active {
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+  color: #e0e7ff;
+}
+
+/* =========================================================
+   INTERACTIVE FLOATING MASCOT (COMPACT MODE)
+   ========================================================= */
+.mascot-stage {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  pointer-events: none;
+}
+
+.mascot-interactive-zone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  pointer-events: auto;
+  animation: hudScaleIn 0.24s var(--ease-spring);
+}
+
+.mascot-body {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 82px;
+  height: 82px;
+  border-radius: 24px;
+  cursor: grab;
+  -webkit-app-region: drag;
+  transition:
+    transform 0.22s var(--ease-spring),
+    filter 0.22s ease;
+  filter: drop-shadow(0 10px 22px rgba(0, 0, 0, 0.55));
+}
+
+.mascot-body:active {
+  cursor: grabbing;
+}
+
+.mascot-interactive-zone--hovered .mascot-body {
+  transform: translateY(-2px) scale(1.04);
+}
+
+.mascot-body--idle {
+  animation: mascotFloat 3.6s ease-in-out infinite;
+}
+
+.mascot-body--listening {
+  filter: drop-shadow(0 0 16px rgba(6, 182, 212, 0.55));
+}
+
+.mascot-body--speaking {
+  filter: drop-shadow(0 0 16px rgba(129, 140, 248, 0.55));
+}
+
+.mascot-body--alert {
+  filter: drop-shadow(0 0 16px rgba(245, 158, 11, 0.6));
+}
+
+.mascot-body--celebrating {
+  animation: mascotCelebrateBounce 0.7s var(--ease-spring) infinite alternate;
+  filter: drop-shadow(0 0 18px rgba(34, 197, 94, 0.6));
+}
+
+.mascot-body--turbo {
+  filter: drop-shadow(0 0 18px rgba(217, 70, 239, 0.6));
+}
+
+.mascot-error-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--danger);
+  border: 1.5px solid #0b0e14;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.55);
+}
+
+/* Speech Bubble */
+.mascot-bubble {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(11, 14, 20, 0.92);
+  border: 1px solid var(--border-strong);
+  backdrop-filter: blur(16px);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.48);
+  animation: hudScaleIn 0.2s var(--ease-spring);
+  -webkit-app-region: no-drag;
+}
+
+.mascot-bubble--clickable {
+  cursor: pointer;
+  transition: transform 0.14s var(--ease-spring), border-color 0.15s ease;
+}
+
+.mascot-bubble--clickable:hover {
+  transform: translateY(-1px);
+  border-color: var(--border-accent);
+}
+
+.mascot-bubble--alert {
+  border-color: rgba(245, 158, 11, 0.55);
+  color: #fde68a;
+}
+
+.mascot-bubble--celebrating {
+  border-color: rgba(34, 197, 94, 0.55);
+  color: #bbf7d0;
+}
+
+.mascot-bubble--listening {
+  border-color: rgba(6, 182, 212, 0.55);
+  color: #cffafe;
+}
+
+.mascot-bubble--turbo {
+  border-color: rgba(217, 70, 239, 0.55);
+  color: #f5d0fe;
+}
+
+/* Quick Hover Controls */
+.mascot-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  opacity: 0;
+  transform: translateY(4px) scale(0.95);
+  pointer-events: none;
+  transition:
+    opacity 0.18s ease,
+    transform 0.18s var(--ease-spring);
+  -webkit-app-region: no-drag;
+}
+
+.mascot-interactive-zone--hovered .mascot-actions {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.mascot-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: rgba(15, 20, 31, 0.92);
+  backdrop-filter: blur(12px);
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.42);
+  transition:
+    transform 0.14s var(--ease-spring),
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.mascot-action-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--border-accent);
+}
+
+.mascot-action-btn:active {
+  transform: scale(0.94);
+}
+
+.mascot-action-btn--live {
+  background: var(--danger-soft);
+  border-color: rgba(239, 68, 68, 0.55);
+  color: #fecaca;
+}
+
+.mascot-action-btn--speaking {
+  background: var(--accent-soft);
+  border-color: var(--border-accent);
+  color: #e0e7ff;
+}
+
+/* =========================================================
+   MASCOT SVG ANIMATIONS
+   ========================================================= */
+.mascot-eyes-blink {
+  transform-origin: center;
+  animation: mascotBlink 4.2s ease-in-out infinite;
+}
+
+.mascot-pulse {
+  transform-origin: center;
+  animation: pulseDot 1.1s ease-in-out infinite;
+}
+
+.mascot-antenna-ring {
+  transform-origin: 40px 11px;
+  animation: mascotSonar 1.5s ease-out infinite;
+}
+
+.mascot-antenna-ring--delay {
+  animation-delay: 0.55s;
+}
+
+.mascot-bar {
+  transform-origin: center;
+  animation: mascotBarBounce 0.55s ease-in-out infinite;
+}
+
+.mascot-bar--2 {
+  animation-delay: 0.15s;
+}
+
+.mascot-bar--3 {
+  animation-delay: 0.3s;
+}
+
+.mascot-sparkle {
+  transform-origin: center;
+  animation: mascotSparkle 1.2s ease-in-out infinite;
+}
+
+.mascot-sparkle--delay {
+  animation-delay: 0.45s;
+}
+
+.mascot-orbit {
+  transform-origin: 40px 40px;
+}
+
+.mascot-orbit--1 {
+  animation: mascotOrbitSpin 6s linear infinite;
+}
+
+.mascot-orbit--2 {
+  animation: mascotOrbitSpinReverse 8s linear infinite;
+}
+
+.mascot-mood--listening .mascot-orbit--1,
+.mascot-mood--speaking .mascot-orbit--1 {
+  animation-duration: 3s;
+}
+
+.mascot-mood--turbo .mascot-orbit--1 {
+  animation-duration: 1.6s;
+}
+
+.mascot-mood--turbo .mascot-orbit--2 {
+  animation-duration: 2.1s;
+}
+
+.mascot-mood--alert .mascot-orbit--1 {
+  animation-duration: 2.2s;
+}
+
+@keyframes mascotFloat {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes mascotCelebrateBounce {
+  from {
+    transform: translateY(0) scale(1);
+  }
+  to {
+    transform: translateY(-5px) scale(1.05);
+  }
+}
+
+@keyframes mascotBlink {
+  0%,
+  44%,
+  48%,
+  100% {
+    transform: scaleY(1);
+  }
+  46% {
+    transform: scaleY(0.12);
+  }
+}
+
+@keyframes mascotSonar {
+  0% {
+    opacity: 0.85;
+    transform: scale(0.7);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+
+@keyframes mascotBarBounce {
+  0%,
+  100% {
+    transform: scaleY(0.55);
+  }
+  50% {
+    transform: scaleY(1.25);
+  }
+}
+
+@keyframes mascotSparkle {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+}
+
+@keyframes mascotOrbitSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes mascotOrbitSpinReverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}

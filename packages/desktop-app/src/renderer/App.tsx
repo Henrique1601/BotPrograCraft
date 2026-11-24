@@ -27,8 +27,32 @@ import type {
 import { useAudioCapture } from './hooks/useAudioCapture';
 import { useAudioPlayback } from './hooks/useAudioPlayback';
 import { useWebSpeech } from './hooks/useWebSpeech';
+import {
+  BotMascot,
+  type MascotMood,
+  type MascotStyle,
+} from './components/BotMascot';
 
 type HudTab = 'chat' | 'challenge' | 'progress';
+
+const MASCOT_STYLE_STORAGE_KEY = 'botprogracraft.mascotStyle';
+const MASCOT_STYLE_OPTIONS: Array<{ id: MascotStyle; label: string }> = [
+  { id: 'robot', label: 'Robozinho' },
+  { id: 'pixel', label: 'Pixel Art' },
+  { id: 'orb', label: 'Orbe IA' },
+];
+
+function readStoredMascotStyle(): MascotStyle {
+  try {
+    const raw = window.localStorage.getItem(MASCOT_STYLE_STORAGE_KEY);
+    if (raw === 'robot' || raw === 'pixel' || raw === 'orb') {
+      return raw;
+    }
+  } catch {
+    // Ignore storage access errors in restricted contexts.
+  }
+  return 'robot';
+}
 
 function VoiceWave({
   active,
@@ -146,9 +170,11 @@ export function App(): React.ReactElement {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
   const [inputText, setInputText] = useState('');
 
-  // Compact HUD pill & active tab state
+  // Compact HUD mascot & active tab state
   const [isCompact, setIsCompact] = useState(false);
   const [activeTab, setActiveTab] = useState<HudTab>('chat');
+  const [mascotStyle, setMascotStyle] = useState<MascotStyle>(readStoredMascotStyle);
+  const [isCelebrating, setIsCelebrating] = useState(false);
 
   // SQLite progress state
   const [progressStats, setProgressStats] = useState<ProgressStats | null>(null);
@@ -525,16 +551,53 @@ export function App(): React.ReactElement {
     await window.botprogracraft.sendTextTurn(trimmed);
   };
 
+  const handleMascotStyleChange = useCallback((nextStyle: MascotStyle) => {
+    setMascotStyle(nextStyle);
+    try {
+      window.localStorage.setItem(MASCOT_STYLE_STORAGE_KEY, nextStyle);
+    } catch {
+      // Ignore storage write errors in restricted contexts.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!challengeFeedback?.passed && !exerciseResult?.passed) {
+      return;
+    }
+    setIsCelebrating(true);
+    const timer = window.setTimeout(() => {
+      setIsCelebrating(false);
+    }, 4000);
+    return () => window.clearTimeout(timer);
+  }, [challengeFeedback, exerciseResult]);
+
+  useEffect(() => {
+    if (!isCompact) {
+      void window.botprogracraft?.setIgnoreMouseEvents?.(false);
+    }
+  }, [isCompact]);
+
   const activeFileLabel = ideContext?.activeFile
     ? ideContext.activeFile.split(/[/\\]/).pop() ?? ideContext.activeFile
     : 'No active file';
 
   const diagnosticsCount = ideContext?.diagnostics.length ?? 0;
-  const isVoiceActive =
-    audioCapture.isCapturing ||
-    audioPlayback.isPlaying ||
-    webSpeech.isListening ||
-    webSpeech.isSpeaking;
+  const isListening = audioCapture.isCapturing || webSpeech.isListening;
+  const isSpeaking = audioPlayback.isPlaying || webSpeech.isSpeaking;
+  const isVoiceActive = isListening || isSpeaking;
+
+  const mascotMood: MascotMood = isListening
+    ? 'listening'
+    : isSpeaking
+      ? 'speaking'
+      : isCelebrating
+        ? 'celebrating'
+        : diagnosticsCount > 0
+          ? 'alert'
+          : tutorMode === 'direct'
+            ? 'turbo'
+            : 'idle';
+
   const passRate =
     progressStats && progressStats.totalAttempts > 0
       ? Math.round(
@@ -544,87 +607,20 @@ export function App(): React.ReactElement {
 
   if (isCompact) {
     return (
-      <div className="hud-compact-wrapper">
-        <div className="hud-pill" role="region" aria-label="BotPrograCraft Compact HUD">
-          <div
-            className="hud-pill-status"
-            title={
-              ideConnected
-                ? 'IDE extension connected'
-                : 'Waiting for IDE extension'
-            }
-          >
-            <span
-              className={`badge-dot ${
-                ideConnected ? '' : ''
-              }`}
-              style={{
-                background: ideConnected ? 'var(--success)' : 'var(--text-muted)',
-                boxShadow: ideConnected
-                  ? '0 0 8px rgba(34, 197, 94, 0.7)'
-                  : 'none',
-              }}
-            />
-            <span>{ideConnected ? 'IDE' : 'Offline'}</span>
-          </div>
-
-          <span className="hud-pill-divider" aria-hidden="true" />
-
-          <span className="hud-pill-mode" title={TUTOR_MODE_INFO[tutorMode].description}>
-            {TUTOR_MODE_INFO[tutorMode].label}
-          </span>
-
-          <div className="hud-pill-actions">
-            <button
-              type="button"
-              className={`pill-icon-btn ${
-                audioCapture.isCapturing
-                  ? 'pill-icon-btn--live'
-                  : audioPlayback.isPlaying
-                    ? 'pill-icon-btn--speaking'
-                    : ''
-              }`}
-              onClick={() => void handleToggleVoice()}
-              aria-pressed={audioCapture.isCapturing}
-              title={
-                audioCapture.isCapturing
-                  ? 'Stop voice capture'
-                  : audioPlayback.isPlaying
-                    ? 'AI speaking — click to start mic'
-                    : 'Start voice capture (Ctrl+Shift+Space)'
-              }
-            >
-              <VoiceWave
-                active={isVoiceActive}
-                label={
-                  audioCapture.isCapturing
-                    ? 'Microphone active'
-                    : audioPlayback.isPlaying
-                      ? 'AI speaking'
-                      : 'Voice idle'
-                }
-              />
-              <span>
-                {audioCapture.isCapturing
-                  ? 'Live'
-                  : audioPlayback.isPlaying
-                    ? 'AI'
-                    : 'Mic'}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              className="pill-icon-btn"
-              onClick={() => setIsCompact(false)}
-              title="Expand HUD"
-              aria-label="Expand HUD"
-            >
-              <CompactToggleIcon compact />
-            </button>
-          </div>
-        </div>
-      </div>
+      <BotMascot
+        styleVariant={mascotStyle}
+        mood={mascotMood}
+        diagnosticsCount={diagnosticsCount}
+        isListening={isListening}
+        isSpeaking={isSpeaking}
+        ideConnected={ideConnected}
+        tutorModeLabel={TUTOR_MODE_INFO[tutorMode].label}
+        onToggleVoice={() => void handleToggleVoice()}
+        onExpand={() => setIsCompact(false)}
+        onHoverChange={(hovered) => {
+          void window.botprogracraft?.setIgnoreMouseEvents?.(!hovered);
+        }}
+      />
     );
   }
 
@@ -719,6 +715,26 @@ export function App(): React.ReactElement {
             </button>
           );
         })}
+      </section>
+
+      <section className="hud-mascot-bar" aria-label="Estilo do Mascote">
+        <span className="hud-mascot-bar-label">Mascote</span>
+        <div className="hud-mascot-segmented" role="group" aria-label="Selecionar estilo visual do mascote">
+          {MASCOT_STYLE_OPTIONS.map((option) => {
+            const active = mascotStyle === option.id;
+            return (
+              <button
+                key={option.id}
+                type="button"
+                className={`mascot-style-btn ${active ? 'mascot-style-btn--active' : ''}`}
+                aria-pressed={active}
+                onClick={() => handleMascotStyleChange(option.id)}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
       </section>
 
       <div className="hud-context-strip">

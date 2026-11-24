@@ -12,9 +12,13 @@ export type RecentAttempt = RecentAttemptSummary;
 export type RecurringError = RecurringErrorSummary;
 export type { CaptureSourceSummary, ScreenFramePreview };
 
+export interface RendererDesktopBridgeApi extends DesktopBridgeApi {
+  setIgnoreMouseEvents?: (ignore: boolean) => Promise<void>;
+}
+
 declare global {
   interface Window {
-    botprogracraft: DesktopBridgeApi;
+    botprogracraft: RendererDesktopBridgeApi;
   }
 }
 

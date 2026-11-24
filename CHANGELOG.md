@@ -5,6 +5,11 @@ All notable changes to **BotPrograCraft** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-24
+
+### Added
+- **Bot Mascote Interativo na Tela**: Adicionado mascote interativo flutuante na HUD Electron com 3 estilos selecionáveis (**Robozinho**, **Pixel Art** e **Orbe IA**), reações visuais em tempo real ao estado da sessão/fala/erros e modo transparente *click-through* via IPC (`desktop:set-ignore-mouse` / `setIgnoreMouseEvents(ignore, { forward: true })`).
+
 ## [0.4.0] - 2026-11-13
 
 ### Added
