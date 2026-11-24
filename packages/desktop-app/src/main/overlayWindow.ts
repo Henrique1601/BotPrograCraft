@@ -2,11 +2,14 @@ import { BrowserWindow, screen } from 'electron';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import type { WindowPosition } from './windowState';
+
 export interface OverlayWindowOptions {
   preloadPath: string;
   rendererHtmlPath: string;
   devServerUrl?: string;
   iconPath?: string;
+  initialPosition?: WindowPosition | null;
 }
 
 export function createOverlayWindow(options: OverlayWindowOptions): BrowserWindow {
@@ -14,14 +17,16 @@ export function createOverlayWindow(options: OverlayWindowOptions): BrowserWindo
   const width = 420;
   const height = 560;
   const margin = 20;
+  const x = options.initialPosition?.x ?? workArea.x + workArea.width - width - margin;
+  const y = options.initialPosition?.y ?? workArea.y + workArea.height - height - margin;
 
   const win = new BrowserWindow({
     width,
     height,
     minWidth: 360,
     minHeight: 420,
-    x: workArea.x + workArea.width - width - margin,
-    y: workArea.y + workArea.height - height - margin,
+    x,
+    y,
     icon: options.iconPath,
     frame: false,
     transparent: true,

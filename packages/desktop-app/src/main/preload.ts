@@ -5,6 +5,7 @@ import type {
   LiveSessionStatus,
   ScreenFrame,
   TutorMode,
+  UserPreferences,
 } from '@botprogracraft/shared';
 import type {
   ChallengeDifficulty,
@@ -13,6 +14,7 @@ import type {
 } from '@botprogracraft/ai-core';
 import type {
   DesktopBridgeApi,
+  PartialUserPreferences,
   ScreenFramePreview,
   TranscriptEntry,
 } from './ipcTypes';
@@ -68,6 +70,12 @@ const api: DesktopBridgeApi = {
     ipcRenderer.invoke('desktop:install-antigravity-mcp'),
   exportStudyReport: () =>
     ipcRenderer.invoke('desktop:export-study-report'),
+  getPreferences: () =>
+    ipcRenderer.invoke('desktop:get-preferences'),
+  updatePreferences: (partial: PartialUserPreferences) =>
+    ipcRenderer.invoke('desktop:update-preferences', partial),
+  showMascotContextMenu: () =>
+    ipcRenderer.invoke('desktop:show-mascot-menu'),
   onIdeConnection: (cb) =>
     subscribe<[connected: boolean]>('event:ide-connection', cb),
   onIdeContext: (cb) =>
@@ -95,6 +103,12 @@ const api: DesktopBridgeApi = {
     subscribe<[]>('event:push-to-talk', cb),
   onPushToTalkToggle: (cb) =>
     subscribe<[]>('event:push-to-talk-toggle', cb),
+  onPreferencesUpdated: (cb) =>
+    subscribe<[preferences: UserPreferences]>('event:preferences-updated', cb),
+  onToggleCompact: (cb) =>
+    subscribe<[]>('event:toggle-compact', cb),
+  onTutorModeUpdated: (cb) =>
+    subscribe<[mode: TutorMode]>('event:tutor-mode-updated', cb),
 };
 
 contextBridge.exposeInMainWorld('botprogracraft', api);

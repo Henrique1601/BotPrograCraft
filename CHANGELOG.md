@@ -5,6 +5,13 @@ All notable changes to **BotPrograCraft** will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-24
+
+### Added
+- **Mascote v2 & Persistência de Janela Multi-Monitor**: Persistência atômica da posição `(x, y)` em `~/.botprogracraft/window-state.json` (`windowState.ts`) com debounce de `250ms` no evento `move`, validação de interseção mínima (`>= 80px`) contra `screen.getAllDisplays()` e fallback automático para o monitor primário.
+- **Menu de Contexto Nativo do Mascote**: Canal IPC `desktop:show-mascot-menu` (`Menu.buildFromTemplate`) permitindo alternar `TutorMode`, trocar estilo do mascote (`Robozinho` / `Pixel Art` / `Orbe IA`), capturar tela agora (`latest-frame.jpg`) e expandir/recolher o HUD.
+- **Preferências, Temas, Opacidade & Atalhos Globais com Rollback**: Persistência atômica em `~/.botprogracraft/preferences.json` (`preferencesStore.ts`) com clamp de opacidade `[0.55, 1.0]`, registro transacional dos atalhos (`pushToTalk`, `toggleCompact`, `captureNow`) com rollback automático em caso de conflito no `globalShortcut.register`, e suporte a Auto-Start no Windows via `app.setLoginItemSettings` (quando `app.isPackaged`).
+
 ## [0.5.0] - 2026-11-24
 
 ### Added

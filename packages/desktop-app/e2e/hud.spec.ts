@@ -75,6 +75,30 @@ test.beforeEach(async ({ page }) => {
         markdown: '# Study Report',
         savedPath: 'C:/mock/.botprogracraft/reports/report.md',
       }),
+      getPreferences: async () => ({
+        mascotStyle: 'robot',
+        theme: 'cyan',
+        opacity: 0.96,
+        autoStart: false,
+        shortcuts: {
+          pushToTalk: 'CommandOrControl+Shift+Space',
+          toggleCompact: 'CommandOrControl+Shift+M',
+          captureNow: 'CommandOrControl+Shift+S',
+        },
+      }),
+      updatePreferences: async (patch: Record<string, unknown>) => ({
+        mascotStyle: 'robot',
+        theme: 'cyan',
+        opacity: 0.96,
+        autoStart: false,
+        shortcuts: {
+          pushToTalk: 'CommandOrControl+Shift+Space',
+          toggleCompact: 'CommandOrControl+Shift+M',
+          captureNow: 'CommandOrControl+Shift+S',
+        },
+        ...patch,
+      }),
+      showMascotContextMenu: async () => {},
       onIdeConnection: noop,
       onIdeContext: noop,
       onLiveStatus: noop,
@@ -87,6 +111,9 @@ test.beforeEach(async ({ page }) => {
       onScreenFramePreview: noop,
       onPushToTalkShortcut: noop,
       onPushToTalkToggle: noop,
+      onPreferencesUpdated: noop,
+      onToggleCompact: noop,
+      onTutorModeUpdated: noop,
     };
   });
 });
@@ -138,4 +165,23 @@ test('switches between Chat, Desafio, and Progresso tabs', async ({ page }) => {
   await page.getByRole('tab', { name: 'Progresso' }).click();
   await expect(page.getByRole('tabpanel', { name: 'Progresso' })).toBeVisible();
   await expect(page.getByText('Progresso do Aluno')).toBeVisible();
+});
+
+test('switches theme to Cyberpunk and adjusts HUD opacity in Config tab', async ({
+  page,
+}) => {
+  await page.goto('/');
+
+  await page.getByRole('tab', { name: 'Config' }).click();
+  const configPanel = page.getByRole('tabpanel', { name: 'Config' });
+  await expect(configPanel).toBeVisible();
+
+  await configPanel.getByRole('button', { name: 'Cyberpunk' }).click();
+  const hudShell = page.locator('.hud-shell');
+  await expect(hudShell).toHaveAttribute('data-theme', 'cyberpunk');
+
+  const opacitySlider = configPanel.getByRole('slider', { name: 'Opacidade do HUD' });
+  await opacitySlider.fill('0.75');
+  await expect(configPanel.getByText('75%')).toBeVisible();
+  await expect(hudShell).toHaveAttribute('style', /--hud-opacity:\s*0\.75/);
 });

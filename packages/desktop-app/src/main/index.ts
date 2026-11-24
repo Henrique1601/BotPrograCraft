@@ -5,6 +5,7 @@ import {
   ipcMain,
   Menu,
   nativeImage,
+  screen,
   session,
   Tray,
 } from 'electron';
@@ -12,13 +13,21 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  DEFAULT_SHORTCUTS,
+  DEFAULT_USER_PREFERENCES,
   DEFAULT_WS_PORT,
   isTutorMode,
+  MASCOT_STYLES,
+  TUTOR_MODE_INFO,
+  TUTOR_MODES,
   type AiProviderType,
   type IdeContextPayload,
   type LiveSessionStatus,
+  type MascotStyle,
   type ScreenFrame,
+  type ShortcutConfig,
   type TutorMode,
+  type UserPreferences,
 } from '@botprogracraft/shared';
 import {
   buildSystemPrompt,
@@ -43,41 +52,59 @@ import { ProgressRepository } from '@botprogracraft/storage';
 import { loadWorkspaceEnv } from './envLoader';
 import type {
   DesktopStateSnapshot,
+  PartialUserPreferences,
   ProgressStatsSummary,
   RecentAttemptSummary,
   RecurringErrorSummary,
   ScreenFramePreview,
   StudyReportExportResult,
   TranscriptEntry,
+  UpdatePreferencesResult,
 } from './ipcTypes';
 import { installAntigravityMcpConfig } from './mcpInstaller';
 import { createOverlayWindow } from './overlayWindow';
+import {
+  loadPreferences,
+  normalizePreferences,
+  savePreferences,
+} from './preferencesStore';
 import {
   capturePrimaryScreenFrame,
   getCaptureSource,
   listCaptureSources,
   setCaptureSource,
 } from './screenCapture';
+import { loadWindowState, saveWindowState } from './windowState';
 import { IdeWsServer } from './wsServer';
 
 loadWorkspaceEnv();
 
-const PUSH_TO_TALK_SHORTCUT = 'CommandOrControl+Shift+Space';
 const SCREEN_CAPTURE_INTERVAL_MS = 5000;
+const WINDOW_MOVE_DEBOUNCE_MS = 250;
 const MAX_TEXT_TURN_LENGTH = 16_000;
 const MAX_AUDIO_CHUNK_BASE64_LENGTH = 512 * 1024;
 const SESSION_ID = `session-${Date.now()}`;
+const MASCOT_STYLE_LABELS: Record<MascotStyle, string> = {
+  robot: 'Robozinho',
+  pixel: 'Pixel Art',
+  orb: 'Orbe IA',
+};
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 let screenInterval: ReturnType<typeof setInterval> | null = null;
+let windowMoveSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let screenShareEnabled = false;
 let currentTutorMode: TutorMode = 'socratic';
 let currentLiveStatus: LiveSessionStatus = 'disconnected';
 let currentAiProvider: AiProviderType = 'gemini-live';
 let currentOllamaModel =
   process.env.OLLAMA_MODEL?.trim() || DEFAULT_OLLAMA_MODEL;
+let currentPreferences: UserPreferences = {
+  ...DEFAULT_USER_PREFERENCES,
+  shortcuts: { ...DEFAULT_SHORTCUTS },
+};
 let progressRepo: ProgressRepository | null = null;
 
 const contextAggregator = new ContextAggregator();
@@ -339,6 +366,139 @@ function startScreenCaptureLoop(): void {
   }, SCREEN_CAPTURE_INTERVAL_MS);
 }
 
+function flushWindowPosition(): void {
+  if (windowMoveSaveTimer) {
+    clearTimeout(windowMoveSaveTimer);
+    windowMoveSaveTimer = null;
+  }
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const [x, y] = mainWindow.getPosition();
+    saveWindowState(getBotPrograCraftHome(), { x, y });
+  }
+}
+
+function scheduleSaveWindowPosition(): void {
+  if (windowMoveSaveTimer) {
+    clearTimeout(windowMoveSaveTimer);
+  }
+  windowMoveSaveTimer = setTimeout(() => {
+    windowMoveSaveTimer = null;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      const [x, y] = mainWindow.getPosition();
+      saveWindowState(getBotPrograCraftHome(), { x, y });
+    }
+  }, WINDOW_MOVE_DEBOUNCE_MS);
+}
+
+function applyTutorMode(mode: TutorMode): void {
+  currentTutorMode = mode;
+  liveManager.updateTutorMode(mode, mode === 'direct');
+  persistLiveState();
+  wsServer.broadcast({
+    type: 'ai:status',
+    status: currentLiveStatus,
+    tutorMode: currentTutorMode,
+    timestamp: Date.now(),
+  });
+  sendToRenderer('event:tutor-mode-updated', mode);
+}
+
+function applyAutoStartSetting(openAtLogin: boolean): { warning?: string } {
+  if (app.isPackaged) {
+    app.setLoginItemSettings({ openAtLogin });
+    return {};
+  }
+  return {
+    warning:
+      'Auto-start só é aplicado na versão empacotada (instalada) do aplicativo; preferência salva para produção.',
+  };
+}
+
+function handlePushToTalkShortcut(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.show();
+  }
+  sendToRenderer('event:push-to-talk-toggle');
+  sendToRenderer('event:push-to-talk');
+  if (screenShareEnabled) {
+    void captureAndBroadcastFrame();
+  }
+}
+
+function handleToggleCompactShortcut(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+  }
+  sendToRenderer('event:toggle-compact');
+}
+
+function handleCaptureNowShortcut(): void {
+  void captureAndBroadcastFrame();
+}
+
+function registerShortcutsTransactional(
+  nextShortcuts: ShortcutConfig,
+  previousShortcuts?: ShortcutConfig,
+): { ok: boolean; error?: string } {
+  const candidates = [
+    nextShortcuts.pushToTalk.trim(),
+    nextShortcuts.toggleCompact.trim(),
+    nextShortcuts.captureNow.trim(),
+  ];
+  if (candidates.some((c) => c.length === 0)) {
+    return {
+      ok: false,
+      error: 'Todos os atalhos globais devem ser preenchidos.',
+    };
+  }
+  if (new Set(candidates).size !== candidates.length) {
+    return {
+      ok: false,
+      error: 'Os atalhos globais devem ser distintos entre si.',
+    };
+  }
+
+  const registerSet = (cfg: ShortcutConfig): string | null => {
+    const entries: Array<[string, string, () => void]> = [
+      ['pushToTalk', cfg.pushToTalk, handlePushToTalkShortcut],
+      ['toggleCompact', cfg.toggleCompact, handleToggleCompactShortcut],
+      ['captureNow', cfg.captureNow, handleCaptureNowShortcut],
+    ];
+    for (const [name, accelerator, handler] of entries) {
+      let registered = false;
+      try {
+        registered = globalShortcut.register(accelerator, handler);
+      } catch {
+        registered = false;
+      }
+      if (!registered) {
+        return `Falha ao registrar atalho "${accelerator}" (${name}). Pode estar em conflito ou inválido.`;
+      }
+    }
+    return null;
+  };
+
+  globalShortcut.unregisterAll();
+  const error = registerSet(nextShortcuts);
+  if (error) {
+    globalShortcut.unregisterAll();
+    if (previousShortcuts) {
+      registerSet(previousShortcuts);
+    }
+    return { ok: false, error };
+  }
+
+  return { ok: true };
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle(
     'desktop:get-initial-state',
@@ -353,6 +513,8 @@ function registerIpcHandlers(): void {
       selectedCaptureSourceId: getCaptureSource(),
       aiProvider: currentAiProvider,
       ollamaModel: currentOllamaModel,
+      preferences: currentPreferences,
+      autoStartSupported: app.isPackaged,
     }),
   );
 
@@ -396,15 +558,7 @@ function registerIpcHandlers(): void {
     if (!isTutorMode(mode)) {
       throw new Error('Invalid tutor mode parameter.');
     }
-    currentTutorMode = mode;
-    liveManager.updateTutorMode(mode, mode === 'direct');
-    persistLiveState();
-    wsServer.broadcast({
-      type: 'ai:status',
-      status: currentLiveStatus,
-      tutorMode: currentTutorMode,
-      timestamp: Date.now(),
-    });
+    applyTutorMode(mode);
   });
 
   ipcMain.handle(
@@ -839,6 +993,115 @@ function registerIpcHandlers(): void {
       return { markdown, savedPath };
     },
   );
+
+  ipcMain.handle('desktop:get-preferences', (): UserPreferences => {
+    return currentPreferences;
+  });
+
+  ipcMain.handle(
+    'desktop:update-preferences',
+    (_event, partial: unknown): UpdatePreferencesResult => {
+      if (!partial || typeof partial !== 'object') {
+        throw new Error('Invalid preferences payload.');
+      }
+      const typedPartial = partial as PartialUserPreferences;
+      const candidate = normalizePreferences(
+        {
+          ...currentPreferences,
+          ...typedPartial,
+          shortcuts: {
+            ...currentPreferences.shortcuts,
+            ...(typedPartial.shortcuts ?? {}),
+          },
+        },
+        currentPreferences,
+      );
+
+      const shortcutsChanged =
+        candidate.shortcuts.pushToTalk !== currentPreferences.shortcuts.pushToTalk ||
+        candidate.shortcuts.toggleCompact !==
+          currentPreferences.shortcuts.toggleCompact ||
+        candidate.shortcuts.captureNow !== currentPreferences.shortcuts.captureNow;
+
+      if (shortcutsChanged) {
+        const regResult = registerShortcutsTransactional(
+          candidate.shortcuts,
+          currentPreferences.shortcuts,
+        );
+        if (!regResult.ok) {
+          return {
+            ok: false,
+            preferences: currentPreferences,
+            error: regResult.error,
+            autoStartSupported: app.isPackaged,
+          };
+        }
+      }
+
+      currentPreferences = savePreferences(getBotPrograCraftHome(), typedPartial);
+
+      let warning: string | undefined;
+      if (typedPartial.autoStart !== undefined) {
+        const autoRes = applyAutoStartSetting(currentPreferences.autoStart);
+        warning = autoRes.warning;
+      }
+
+      sendToRenderer('event:preferences-updated', currentPreferences);
+      return {
+        ok: true,
+        preferences: currentPreferences,
+        warning,
+        autoStartSupported: app.isPackaged,
+      };
+    },
+  );
+
+  ipcMain.handle('desktop:show-mascot-menu', (event) => {
+    const menu = Menu.buildFromTemplate([
+      {
+        label: 'Modo de Tutoria',
+        submenu: TUTOR_MODES.map((mode) => ({
+          label: TUTOR_MODE_INFO[mode].label,
+          type: 'radio' as const,
+          checked: currentTutorMode === mode,
+          click: () => {
+            applyTutorMode(mode);
+          },
+        })),
+      },
+      {
+        label: 'Estilo do Mascote',
+        submenu: MASCOT_STYLES.map((style) => ({
+          label: MASCOT_STYLE_LABELS[style],
+          type: 'radio' as const,
+          checked: currentPreferences.mascotStyle === style,
+          click: () => {
+            currentPreferences = savePreferences(getBotPrograCraftHome(), {
+              mascotStyle: style,
+            });
+            sendToRenderer('event:preferences-updated', currentPreferences);
+          },
+        })),
+      },
+      { type: 'separator' },
+      {
+        label: 'Capturar Tela Agora',
+        click: () => {
+          void captureAndBroadcastFrame();
+        },
+      },
+      {
+        label: 'Expandir / Recolher HUD',
+        click: () => {
+          sendToRenderer('event:toggle-compact');
+        },
+      },
+    ]);
+
+    const targetWindow =
+      BrowserWindow.fromWebContents(event.sender) ?? mainWindow ?? undefined;
+    menu.popup({ window: targetWindow });
+  });
 }
 
 function setupWsBridge(): void {
@@ -882,8 +1145,24 @@ function setupWsBridge(): void {
   wsServer.start();
 }
 
+function attachMainWindowHandlers(win: BrowserWindow): void {
+  win.on('move', scheduleSaveWindowPosition);
+  win.on('close', (event) => {
+    flushWindowPosition();
+    if (!isQuitting && tray) {
+      event.preventDefault();
+      win.hide();
+    }
+  });
+}
+
 void app.whenReady().then(() => {
   const devServerUrl = getAllowedDevServerUrl();
+  const homeDir = getBotPrograCraftHome();
+  currentPreferences = loadPreferences(homeDir);
+  if (app.isPackaged && currentPreferences.autoStart) {
+    applyAutoStartSetting(true);
+  }
 
   session.defaultSession.setPermissionRequestHandler(
     (webContents, permission, callback, details) => {
@@ -898,7 +1177,7 @@ void app.whenReady().then(() => {
 
   try {
     progressRepo = new ProgressRepository({
-      dbPath: path.join(getBotPrograCraftHome(), 'botprogracraft.db'),
+      dbPath: path.join(homeDir, 'botprogracraft.db'),
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -912,19 +1191,15 @@ void app.whenReady().then(() => {
     resolveAssetPath(process.platform === 'win32' ? 'icon.ico' : 'icon.png') ??
     resolveAssetPath('icon.png');
 
+  const initialPosition = loadWindowState(homeDir, screen.getAllDisplays());
   mainWindow = createOverlayWindow({
     preloadPath: path.join(__dirname, 'preload.js'),
     rendererHtmlPath: path.join(__dirname, '..', 'renderer', 'index.html'),
     devServerUrl,
     iconPath,
+    initialPosition,
   });
-
-  mainWindow.on('close', (event) => {
-    if (!isQuitting && tray) {
-      event.preventDefault();
-      mainWindow?.hide();
-    }
-  });
+  attachMainWindowHandlers(mainWindow);
 
   const trayIconPath = resolveAssetPath('icon.png') ?? iconPath;
   if (trayIconPath) {
@@ -964,19 +1239,37 @@ void app.whenReady().then(() => {
     tray.on('double-click', toggleWindow);
   }
 
-  globalShortcut.register(PUSH_TO_TALK_SHORTCUT, () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      if (mainWindow.isMinimized()) {
-        mainWindow.restore();
-      }
-      mainWindow.show();
+  const initialShortcuts = registerShortcutsTransactional(
+    currentPreferences.shortcuts,
+  );
+  if (!initialShortcuts.ok && initialShortcuts.error) {
+    console.warn(initialShortcuts.error);
+    // Best-effort individual registration so non-conflicting shortcuts still work.
+    try {
+      globalShortcut.register(
+        currentPreferences.shortcuts.pushToTalk,
+        handlePushToTalkShortcut,
+      );
+    } catch {
+      // Ignore startup shortcut conflict.
     }
-    sendToRenderer('event:push-to-talk-toggle');
-    sendToRenderer('event:push-to-talk');
-    if (screenShareEnabled) {
-      void captureAndBroadcastFrame();
+    try {
+      globalShortcut.register(
+        currentPreferences.shortcuts.toggleCompact,
+        handleToggleCompactShortcut,
+      );
+    } catch {
+      // Ignore startup shortcut conflict.
     }
-  });
+    try {
+      globalShortcut.register(
+        currentPreferences.shortcuts.captureNow,
+        handleCaptureNowShortcut,
+      );
+    } catch {
+      // Ignore startup shortcut conflict.
+    }
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -985,7 +1278,9 @@ void app.whenReady().then(() => {
         rendererHtmlPath: path.join(__dirname, '..', 'renderer', 'index.html'),
         devServerUrl,
         iconPath,
+        initialPosition: loadWindowState(homeDir, screen.getAllDisplays()),
       });
+      attachMainWindowHandlers(mainWindow);
     } else if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.show();
     }
@@ -997,6 +1292,7 @@ app.on('before-quit', () => {
 });
 
 app.on('will-quit', () => {
+  flushWindowPosition();
   globalShortcut.unregisterAll();
   stopScreenCaptureLoop();
   liveManager.disconnect();

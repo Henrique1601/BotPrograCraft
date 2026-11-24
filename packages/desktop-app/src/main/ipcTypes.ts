@@ -3,7 +3,9 @@ import type {
   IdeContextPayload,
   LiveSessionStatus,
   ScreenFrame,
+  ShortcutConfig,
   TutorMode,
+  UserPreferences,
 } from '@botprogracraft/shared';
 import type {
   ChallengeDifficulty,
@@ -31,6 +33,18 @@ export interface ScreenFramePreview {
   timestamp: number;
 }
 
+export type PartialUserPreferences = Partial<Omit<UserPreferences, 'shortcuts'>> & {
+  shortcuts?: Partial<ShortcutConfig>;
+};
+
+export interface UpdatePreferencesResult {
+  ok: boolean;
+  preferences: UserPreferences;
+  error?: string;
+  warning?: string;
+  autoStartSupported: boolean;
+}
+
 export interface DesktopStateSnapshot {
   ideConnected: boolean;
   ideContext: IdeContextPayload | null;
@@ -42,6 +56,8 @@ export interface DesktopStateSnapshot {
   selectedCaptureSourceId: string | null;
   aiProvider: AiProviderType;
   ollamaModel: string;
+  preferences: UserPreferences;
+  autoStartSupported: boolean;
 }
 
 export interface ProgressStatsSummary {
@@ -104,6 +120,9 @@ export interface DesktopBridgeApi {
   runExerciseCheck: (params: ExerciseCheckParams) => Promise<ExerciseCheckResult>;
   installAntigravityMcp: () => Promise<McpInstallResult>;
   exportStudyReport: () => Promise<StudyReportExportResult>;
+  getPreferences: () => Promise<UserPreferences>;
+  updatePreferences: (partial: PartialUserPreferences) => Promise<UpdatePreferencesResult>;
+  showMascotContextMenu: () => Promise<void>;
   onIdeConnection: (cb: (connected: boolean) => void) => () => void;
   onIdeContext: (cb: (context: IdeContextPayload) => void) => () => void;
   onLiveStatus: (cb: (status: LiveSessionStatus, message?: string) => void) => () => void;
@@ -116,4 +135,7 @@ export interface DesktopBridgeApi {
   onScreenFramePreview: (cb: (preview: ScreenFramePreview) => void) => () => void;
   onPushToTalkShortcut: (cb: () => void) => () => void;
   onPushToTalkToggle: (cb: () => void) => () => void;
+  onPreferencesUpdated: (cb: (preferences: UserPreferences) => void) => () => void;
+  onToggleCompact: (cb: () => void) => () => void;
+  onTutorModeUpdated: (cb: (mode: TutorMode) => void) => () => void;
 }

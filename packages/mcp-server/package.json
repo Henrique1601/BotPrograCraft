@@ -1,6 +1,6 @@
 {
   "name": "@botprogracraft/mcp-server",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "license": "MIT",
   "description": "Stdio MCP server exposing BotPrograCraft live IDE context, screen frames, tutor prompts, and learning progress to Antigravity IDE.",

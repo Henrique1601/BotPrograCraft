@@ -20,6 +20,7 @@ export interface BotMascotProps {
   onToggleVoice?: () => void;
   onExpand?: () => void;
   onHoverChange?: (hovered: boolean) => void;
+  onContextMenu?: () => void;
 }
 
 const MOOD_COLORS: Record<MascotMood, { primary: string; glow: string }> = {
@@ -383,6 +384,7 @@ export function BotMascot({
   onToggleVoice,
   onExpand,
   onHoverChange,
+  onContextMenu,
 }: BotMascotProps): React.ReactElement {
   const [hovered, setHovered] = useState(false);
 
@@ -414,6 +416,10 @@ export function BotMascot({
         className={`mascot-interactive-zone ${hovered ? 'mascot-interactive-zone--hovered' : ''}`}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onContextMenu?.();
+        }}
       >
         {bubble && (
           <button

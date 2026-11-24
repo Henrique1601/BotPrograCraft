@@ -1,12 +1,18 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  DEFAULT_USER_PREFERENCES,
+  MAX_HUD_OPACITY,
+  MIN_HUD_OPACITY,
   TUTOR_MODES,
   TUTOR_MODE_INFO,
   type AiProviderType,
+  type HudTheme,
   type IdeContextPayload,
   type LiveSessionStatus,
   type ScreenFrame,
+  type ShortcutConfig,
   type TutorMode,
+  type UserPreferences,
 } from '@botprogracraft/shared';
 import type {
   ChallengeDifficulty,
@@ -33,7 +39,13 @@ import {
   type MascotStyle,
 } from './components/BotMascot';
 
-type HudTab = 'chat' | 'challenge' | 'progress';
+type HudTab = 'chat' | 'challenge' | 'progress' | 'config';
+
+const HUD_THEME_OPTIONS: Array<{ id: HudTheme; label: string }> = [
+  { id: 'cyan', label: 'Cyan' },
+  { id: 'emerald', label: 'Emerald' },
+  { id: 'cyberpunk', label: 'Cyberpunk' },
+];
 
 const MASCOT_STYLE_STORAGE_KEY = 'botprogracraft.mascotStyle';
 const MASCOT_STYLE_OPTIONS: Array<{ id: MascotStyle; label: string }> = [
@@ -209,6 +221,17 @@ export function App(): React.ReactElement {
   const [mcpStatusMsg, setMcpStatusMsg] = useState<string | null>(null);
   const [reportStatusMsg, setReportStatusMsg] = useState<string | null>(null);
 
+  // User preferences (theme, opacity, shortcuts, auto-start)
+  const [preferences, setPreferences] = useState<UserPreferences>(
+    DEFAULT_USER_PREFERENCES,
+  );
+  const [shortcutDraft, setShortcutDraft] = useState<ShortcutConfig>(
+    DEFAULT_USER_PREFERENCES.shortcuts,
+  );
+  const [shortcutWarning, setShortcutWarning] = useState<string | null>(null);
+  const [configSavedMsg, setConfigSavedMsg] = useState<string | null>(null);
+  const [savingShortcuts, setSavingShortcuts] = useState(false);
+
   // AI Provider (Gemini Live vs Ollama Local)
   const [aiProvider, setAiProvider] = useState<AiProviderType>('gemini-live');
   const [ollamaHealth, setOllamaHealth] = useState<OllamaHealthResult | null>(
@@ -346,10 +369,22 @@ export function App(): React.ReactElement {
       setAiProvider(snapshot.aiProvider);
     });
 
+    void window.botprogracraft
+      ?.getPreferences?.()
+      .then((prefs) => {
+        if (!mounted || !prefs) return;
+        setPreferences(prefs);
+        setShortcutDraft(prefs.shortcuts);
+        setMascotStyle(prefs.mascotStyle);
+      })
+      .catch(() => {
+        // Fallback to DEFAULT_USER_PREFERENCES already initialized in state.
+      });
+
     void refreshCaptureSources();
     void refreshOllamaHealth();
 
-    const unsubs = [
+    const maybeUnsubs: Array<(() => void) | undefined> = [
       window.botprogracraft.onIdeConnection(setIdeConnected),
       window.botprogracraft.onIdeContext(setIdeContext),
       window.botprogracraft.onLiveStatus((status, message) => {
@@ -376,12 +411,23 @@ export function App(): React.ReactElement {
       window.botprogracraft.onPushToTalkToggle(() => {
         void handleToggleVoiceRef.current();
       }),
+      window.botprogracraft?.onPreferencesUpdated?.((prefs) => {
+        setPreferences(prefs);
+        setShortcutDraft(prefs.shortcuts);
+        setMascotStyle(prefs.mascotStyle);
+      }),
+      window.botprogracraft?.onToggleCompact?.(() => {
+        setIsCompact((prev) => !prev);
+      }),
+      window.botprogracraft?.onTutorModeUpdated?.((mode) => {
+        setTutorMode(mode);
+      }),
     ];
 
     return () => {
       mounted = false;
-      for (const unsub of unsubs) {
-        unsub();
+      for (const unsub of maybeUnsubs) {
+        unsub?.();
       }
     };
   }, [
@@ -551,14 +597,99 @@ export function App(): React.ReactElement {
     await window.botprogracraft.sendTextTurn(trimmed);
   };
 
-  const handleMascotStyleChange = useCallback((nextStyle: MascotStyle) => {
-    setMascotStyle(nextStyle);
-    try {
-      window.localStorage.setItem(MASCOT_STYLE_STORAGE_KEY, nextStyle);
-    } catch {
-      // Ignore storage write errors in restricted contexts.
+  const applyPreferencePatch = useCallback(
+    async (patch: Partial<UserPreferences>) => {
+      setPreferences((prev) => ({
+        ...prev,
+        ...patch,
+        shortcuts: patch.shortcuts
+          ? { ...prev.shortcuts, ...patch.shortcuts }
+          : prev.shortcuts,
+      }));
+      if (!window.botprogracraft?.updatePreferences) {
+        return;
+      }
+      try {
+        const res = await window.botprogracraft.updatePreferences(patch);
+        if (res && typeof res === 'object') {
+          if ('preferences' in res && res.preferences) {
+            setPreferences(res.preferences);
+            setShortcutDraft(res.preferences.shortcuts);
+            setMascotStyle(res.preferences.mascotStyle);
+          } else if ('theme' in res && 'shortcuts' in res) {
+            setPreferences(res as UserPreferences);
+            setShortcutDraft((res as UserPreferences).shortcuts);
+            setMascotStyle((res as UserPreferences).mascotStyle);
+          }
+          if ('warnings' in res && Array.isArray(res.warnings) && res.warnings.length > 0) {
+            setShortcutWarning(res.warnings.join(' '));
+          } else if ('shortcutErrors' in res && res.shortcutErrors) {
+            const msgs = Object.values(res.shortcutErrors).filter(Boolean);
+            if (msgs.length > 0) {
+              setShortcutWarning(msgs.join(' '));
+            }
+          } else if ('error' in res && res.error) {
+            setShortcutWarning(res.error);
+          }
+        }
+      } catch (err) {
+        setShortcutWarning(
+          err instanceof Error
+            ? err.message
+            : 'Falha ao atualizar preferências.',
+        );
+      }
+    },
+    [],
+  );
+
+  const handleSaveShortcuts = async () => {
+    setShortcutWarning(null);
+    setConfigSavedMsg(null);
+    const values = [
+      shortcutDraft.pushToTalk.trim(),
+      shortcutDraft.toggleCompact.trim(),
+      shortcutDraft.captureNow.trim(),
+    ];
+    if (values.some((v) => !v)) {
+      setShortcutWarning('Preencha todos os atalhos antes de salvar.');
+      return;
     }
-  }, []);
+    const normalized = values.map((v) => v.toLowerCase());
+    if (new Set(normalized).size !== normalized.length) {
+      setShortcutWarning(
+        'Conflito detectado: cada ação precisa de um atalho global único.',
+      );
+      return;
+    }
+
+    setSavingShortcuts(true);
+    try {
+      await applyPreferencePatch({
+        shortcuts: {
+          pushToTalk: values[0],
+          toggleCompact: values[1],
+          captureNow: values[2],
+        },
+      });
+      setConfigSavedMsg('Atalhos salvos.');
+    } finally {
+      setSavingShortcuts(false);
+    }
+  };
+
+  const handleMascotStyleChange = useCallback(
+    (nextStyle: MascotStyle) => {
+      setMascotStyle(nextStyle);
+      try {
+        window.localStorage.setItem(MASCOT_STYLE_STORAGE_KEY, nextStyle);
+      } catch {
+        // Ignore storage write errors in restricted contexts.
+      }
+      void applyPreferencePatch({ mascotStyle: nextStyle });
+    },
+    [applyPreferencePatch],
+  );
 
   useEffect(() => {
     if (!challengeFeedback?.passed && !exerciseResult?.passed) {
@@ -620,12 +751,19 @@ export function App(): React.ReactElement {
         onHoverChange={(hovered) => {
           void window.botprogracraft?.setIgnoreMouseEvents?.(!hovered);
         }}
+        onContextMenu={() => {
+          void window.botprogracraft?.showMascotContextMenu?.();
+        }}
       />
     );
   }
 
   return (
-    <div className="hud-shell">
+    <div
+      className="hud-shell"
+      data-theme={preferences.theme}
+      style={{ '--hud-opacity': String(preferences.opacity) } as React.CSSProperties}
+    >
       <header className="hud-titlebar">
         <div className="hud-brand">
           <span
@@ -777,6 +915,15 @@ export function App(): React.ReactElement {
             onClick={() => setActiveTab('progress')}
           >
             Progresso
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'config'}
+            className={`hud-tab ${activeTab === 'config' ? 'hud-tab--active' : ''}`}
+            onClick={() => setActiveTab('config')}
+          >
+            Config
           </button>
         </div>
       </div>
@@ -973,7 +1120,7 @@ export function App(): React.ReactElement {
             </div>
           )}
         </section>
-      ) : (
+      ) : activeTab === 'progress' ? (
         <section className="progress-panel" role="tabpanel" aria-label="Progresso">
           <div className="progress-header">
             <div>
@@ -1141,6 +1288,159 @@ export function App(): React.ReactElement {
                 })}
               </div>
             )}
+          </div>
+        </section>
+      ) : (
+        <section className="config-panel" role="tabpanel" aria-label="Config">
+          <div className="config-section">
+            <div className="config-section-header">
+              <span className="config-section-title">Tema do HUD</span>
+              <span className="config-section-hint">Aplicado em tempo real</span>
+            </div>
+            <div className="config-theme-grid" role="group" aria-label="Tema do HUD">
+              {HUD_THEME_OPTIONS.map((themeOption) => {
+                const active = preferences.theme === themeOption.id;
+                return (
+                  <button
+                    key={themeOption.id}
+                    type="button"
+                    className={`config-theme-btn ${active ? 'config-theme-btn--active' : ''}`}
+                    aria-pressed={active}
+                    onClick={() =>
+                      void applyPreferencePatch({ theme: themeOption.id })
+                    }
+                  >
+                    <span className={`config-swatch config-swatch--${themeOption.id}`} />
+                    <span>{themeOption.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="config-section">
+            <div className="config-section-header">
+              <span className="config-section-title">Opacidade do HUD</span>
+              <span className="config-slider-value">
+                {Math.round(preferences.opacity * 100)}%
+              </span>
+            </div>
+            <div className="config-slider-row">
+              <input
+                type="range"
+                className="config-slider"
+                aria-label="Opacidade do HUD"
+                min={MIN_HUD_OPACITY}
+                max={MAX_HUD_OPACITY}
+                step={0.01}
+                value={preferences.opacity}
+                onChange={(e) => {
+                  const nextOpacity = Number(e.target.value);
+                  void applyPreferencePatch({ opacity: nextOpacity });
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="config-section">
+            <div className="config-section-header">
+              <span className="config-section-title">Atalhos Globais</span>
+              <span className="config-section-hint">Aceleradores Electron</span>
+            </div>
+
+            <div className="config-shortcuts-grid">
+              <label className="config-shortcut-row">
+                <span className="config-shortcut-label">Push to Talk</span>
+                <input
+                  type="text"
+                  className="hud-input"
+                  aria-label="Atalho Push to Talk"
+                  value={shortcutDraft.pushToTalk}
+                  onChange={(e) =>
+                    setShortcutDraft((prev) => ({
+                      ...prev,
+                      pushToTalk: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+
+              <label className="config-shortcut-row">
+                <span className="config-shortcut-label">Alternar HUD</span>
+                <input
+                  type="text"
+                  className="hud-input"
+                  aria-label="Atalho Alternar HUD"
+                  value={shortcutDraft.toggleCompact}
+                  onChange={(e) =>
+                    setShortcutDraft((prev) => ({
+                      ...prev,
+                      toggleCompact: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+
+              <label className="config-shortcut-row">
+                <span className="config-shortcut-label">Capturar Tela</span>
+                <input
+                  type="text"
+                  className="hud-input"
+                  aria-label="Atalho Capturar Tela"
+                  value={shortcutDraft.captureNow}
+                  onChange={(e) =>
+                    setShortcutDraft((prev) => ({
+                      ...prev,
+                      captureNow: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </div>
+
+            {shortcutWarning && (
+              <div className="hud-alert hud-alert--warn" role="alert">
+                {shortcutWarning}
+              </div>
+            )}
+
+            {configSavedMsg && !shortcutWarning && (
+              <div className="progress-notice">{configSavedMsg}</div>
+            )}
+
+            <div className="config-actions-row">
+              <button
+                type="button"
+                className="send-btn"
+                disabled={savingShortcuts}
+                onClick={() => void handleSaveShortcuts()}
+              >
+                {savingShortcuts ? 'Salvando...' : 'Salvar Atalhos'}
+              </button>
+            </div>
+          </div>
+
+          <div className="config-section">
+            <div className="config-toggle-row">
+              <div>
+                <div className="config-section-title">Auto-Start no Windows</div>
+                <div className="config-section-hint">
+                  Iniciar automaticamente ao fazer login no sistema (apenas app instalado)
+                </div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={preferences.autoStart}
+                aria-label="Auto-Start no Windows"
+                className={`config-toggle-btn ${preferences.autoStart ? 'config-toggle-btn--on' : ''}`}
+                onClick={() =>
+                  void applyPreferencePatch({ autoStart: !preferences.autoStart })
+                }
+              >
+                <span className="config-toggle-thumb" />
+              </button>
+            </div>
           </div>
         </section>
       )}
