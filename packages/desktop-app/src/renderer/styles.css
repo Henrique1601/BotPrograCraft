@@ -1322,6 +1322,8 @@ input:focus-visible {
   -webkit-app-region: no-drag;
 }
 
+.mascot-interactive-zone:hover .mascot-actions,
+.mascot-interactive-zone:focus-within .mascot-actions,
 .mascot-interactive-zone--hovered .mascot-actions {
   opacity: 1;
   transform: translateY(0) scale(1);

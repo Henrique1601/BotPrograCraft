@@ -118,7 +118,9 @@ test('toggles between expanded HUD and interactive mascot mode', async ({ page }
   await mascotGroup.getByRole('button', { name: 'Orbe IA' }).click();
 
   await page.getByRole('button', { name: 'Switch to compact pill' }).click();
-  await expect(page.getByRole('region', { name: 'BotPrograCraft Mascote Interativo' })).toBeVisible();
+  const mascotRegion = page.getByRole('region', { name: 'BotPrograCraft Mascote Interativo' });
+  await expect(mascotRegion).toBeVisible();
+  await mascotRegion.hover();
 
   await page.getByRole('button', { name: 'Expandir HUD' }).click();
   await expect(page.getByLabel('Tutor Mode')).toBeVisible();
